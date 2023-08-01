@@ -52,6 +52,28 @@ pub mod pallet {
 	// https://docs.substrate.io/main-docs/build/runtime-storage/#declaring-storage-items
 	pub type Something<T> = StorageValue<_, u32>;
 
+
+	// DEX storage items 
+	#[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
+	pub struct PoolInfo<T: Config> {
+    	/// The first token in the pair
+    	token1: T::AssetId,
+    
+    	/// The second token in the pair
+    	token2: T::AssetId,
+
+    	/// Total amount of the first token
+    	total_reserve_1: T::AssetBalance,
+
+    	/// Total amount of the second token
+    	total_reserve_2: T::AssetBalance,
+
+    	/// Total supply of the LP tokens
+    	lp_supply: T::AssetBalance,
+	}
+	
+
+
 	// Pallets use events to inform users when important changes are made.
 	// https://docs.substrate.io/main-docs/build/events-errors/
 	#[pallet::event]

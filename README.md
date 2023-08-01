@@ -22,6 +22,30 @@ The current exchange rate between tokenA and tokenB not including fees is comput
 Price = reserveA / reserveB
 ```
 
+### LP token math
+This is the math that is used to ensure a fair distribution of liquidity provider (LP) tokens based on the amount of liquidity provided. 
+#### Creating a pool
+When a user creates a creates a new pool. The amount of LP tokens they receive is calculated by the following formula:
+```
+lp = sqrt(a*b)
+```
+Where `a` is the amount of tokenA and `b` is the amount of tokenB.
+
+#### Adding liquidity
+When a user adds liquidity to an existing pool, the amount of LP tokens they receive is calculated by the following formula:
+```
+lp = sqrt((A+a)*(B+b)) - sqrt(A*B)
+```
+Where `A` is the amount of tokenA in the pool, `B` is the amount of tokenB in the pool, `a` is the amount of tokenA the user is adding, and `b` is the amount of tokenB the user is adding.
+
+#### Removing liquidity
+When a user removes liquidity from an existing pool, the amount of tokens a and b they receive is calculated by the following formula:
+```
+a = lp / LP * A
+b = lp / LP * B
+```
+Where `lp` is the amount of LP tokens the user is removing, `LP` is the total amount of LP tokens in the pool, `A` is the amount of tokenA in the pool, and `B` is the amount of tokenB in the pool.
+
 ## API
 
 The pallet exposes the following API. All methods are called on an instance of the DexInterface:
