@@ -300,12 +300,6 @@ impl pallet_assets::Config for Runtime {
 	type BenchmarkHelper = ();
 }
 
-/// Configure the pallet-voting in pallets/voting.
-impl pallet_voting::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type NativeBalance = Balances;
-}
-
 pub struct AuthorityToAccount;
 
 impl Convert<AuraId, AccountId> for AuthorityToAccount {
@@ -315,13 +309,6 @@ impl Convert<AuraId, AccountId> for AuthorityToAccount {
 		Decode::decode(&mut &authority.encode()[..])
 			.expect("We expect every authority id from aura to be the same an an account id.")
 	}
-}
-
-/// Configure the pallet-dpos in pallets/dpos.
-impl pallet_dpos::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type AuthorityToAccount = AuthorityToAccount;
-	type NativeBalance = Balances;
 }
 
 /// Configure the pallet-dex in pallets/dex.
@@ -343,8 +330,6 @@ construct_runtime!(
 		Sudo: pallet_sudo,
 		Assets: pallet_assets,
 		Dex: pallet_dex,
-		Dpos: pallet_dpos,
-		Voting: pallet_voting,
 	}
 );
 
@@ -393,8 +378,6 @@ mod benches {
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
 		[pallet_dex, Dex]
-		[pallet_dpos, Dpos]
-		[pallet_voting, Voting]
 	);
 }
 
