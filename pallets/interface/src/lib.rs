@@ -15,88 +15,9 @@
 
 use core::{cmp::Ord, fmt::Debug};
 use frame_support::{
-	dispatch::Vec,
-	pallet_prelude::{
-		DispatchError, DispatchResult, MaxEncodedLen, MaybeSerializeDeserialize, Member, Parameter,
-	},
+	pallet_prelude::{DispatchResult, MaxEncodedLen, MaybeSerializeDeserialize, Member, Parameter},
 	traits::tokens::{AssetId as AssetIdTrait, Balance as BalanceTrait},
 };
-
-/// A minimal interface to test the functionality of the Voting pallet.
-pub trait VotingInterface {
-	/// The type which can be used to identify accounts.
-	type AccountId: Parameter + Member + MaybeSerializeDeserialize + Debug + Ord + MaxEncodedLen;
-	/// The type representing the balance users can vote with.
-	type VotingBalance: BalanceTrait;
-	/// The type representing a unique ID for a proposal.
-	type ProposalId: Parameter + Member + MaybeSerializeDeserialize + Debug + Ord + MaxEncodedLen;
-
-	/// This function should register a user in the identity system, allowing that user to vote, and
-	/// give that user some voting balance equal to `amount`.
-	fn add_voter(who: Self::AccountId, amount: Self::VotingBalance) -> DispatchResult;
-
-	/// Create a proposal with the following metadata.
-	///
-	/// If `Ok`, return the `ProposalId`.
-	fn create_proposal(metadata: Vec<u8>) -> Result<Self::ProposalId, DispatchError>;
-
-	/// Make a voter vote on a proposal with a given vote weight.
-	///
-	/// If the voter supports the proposal, they will vote `aye = true`, otherwise they should vote
-	/// `aye = false`.
-	///
-	/// The `vote_weight` should represent the value after we take the sqrt of their voting balance,
-	/// thus you can simply square the `amount` rather than taking the sqrt of some value.
-	///
-	/// For example: If a user votes with `vote_weight = 10`, then we should check they have at
-	/// least `100` total voting balance.
-	fn vote(
-		proposal: Self::ProposalId,
-		voter: Self::AccountId,
-		aye: bool,
-		vote_weight: Self::VotingBalance,
-	) -> DispatchResult;
-
-	/// Do whatever is needed to resolve the vote, and determine the outcome.
-	///
-	/// If `Ok`, return the result of the vote with a bool, `true` being the vote passed, and
-	/// `false` being the vote failed.
-	fn close_vote(proposal: Self::ProposalId) -> Result<bool, DispatchError>;
-}
-
-/// A minimal interface to test the functionality of the DPOS pallet.
-pub trait DposInterface {
-	/// The type which can be used to identify accounts.
-	type AccountId: Parameter + Member + MaybeSerializeDeserialize + Debug + Ord + MaxEncodedLen;
-	/// The underlying balance type of the NativeBalance.
-	type StakingBalance: BalanceTrait;
-
-	/// A helper function which should give a new user a balance they can use in the staking system.
-	fn setup_account(who: Self::AccountId, amount: Self::StakingBalance) -> DispatchResult;
-
-	/// Get the balance of any account.
-	fn balance(who: Self::AccountId) -> Self::StakingBalance;
-
-	/// Register a user to be a validator.
-	fn register_validator(who: Self::AccountId) -> DispatchResult;
-
-	/// Any user with a balance can delegate. They choose who they wan to delegate to, and how much
-	/// they want to stake.
-	fn delegate(
-		delegator: Self::AccountId,
-		validator: Self::AccountId,
-		amount: Self::StakingBalance,
-	) -> DispatchResult;
-
-	/// Get a new list of the winning validators with the highest stake to use in the next staking
-	/// session.
-	///
-	/// Should return up to `max_validators` in the vector.
-	fn get_winning_validators(max_validators: u32) -> Result<Vec<Self::AccountId>, DispatchError>;
-
-	/// Query the total amount of stake backing a validator.
-	fn get_validator_stake(who: Self::AccountId) -> Option<Self::StakingBalance>;
-}
 
 /// A minimal interface to test the functionality of the DEX Pallet.
 pub trait DexInterface {
