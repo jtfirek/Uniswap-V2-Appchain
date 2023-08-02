@@ -15,7 +15,8 @@
 
 use core::{cmp::Ord, fmt::Debug};
 use frame_support::{
-	pallet_prelude::{DispatchResult, MaxEncodedLen, MaybeSerializeDeserialize, Member, Parameter},
+	pallet_prelude::{ DispatchResult, MaxEncodedLen, MaybeSerializeDeserialize, Member, Parameter,
+	},
 	traits::tokens::{AssetId as AssetIdTrait, Balance as BalanceTrait},
 };
 
