@@ -188,11 +188,9 @@ pub mod pallet {
 					let lp_amount = Self::calculate_lp(&add_amounts, None)?;
 					// <T::Fungibles as Create<T::AccountId>>
 					T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , false, lp_amount)?;
-					// let pool = Pool::new(asset_a, asset_b, amount_a, amount_b, lp_amount)
-					// <PoolMap<T>>::insert(key, pool);
-					// <fungibles::Mutate<T::AccountId>>::mint_into(cur_lp_id, &origin, lp_amount)?;
-					T::Fungibles::mint_into(cur_lp_id, &who, lp_amount)?;
-					// ::mint_into(asset_id.clone(), &who, asset_balance)?;
+					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
+					let new_pool = Pool::<T>::new(add_amounts, lp_amount);
+					<PoolMap<T>>::insert(&cur_lp_id, new_pool);
 					Ok(())
 				},
 				Some(old) => {
