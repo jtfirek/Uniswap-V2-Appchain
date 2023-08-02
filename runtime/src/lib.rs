@@ -311,11 +311,15 @@ impl Convert<AuraId, AccountId> for AuthorityToAccount {
 	}
 }
 
+parameter_types! {
+	pub const DexPalletId: frame_support::PalletId = frame_support::PalletId(*b"pba/dex0");
+}
 /// Configure the pallet-dex in pallets/dex.
 impl pallet_dex::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type NativeBalance = Balances;
 	type Fungibles = Assets;
+	type PalletId = DexPalletId;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
