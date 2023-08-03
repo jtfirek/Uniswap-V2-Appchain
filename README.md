@@ -7,7 +7,7 @@ The DEX includes functionality to incentivize users to create liquidity pools an
 ## How it works 
 
 ### Swaps
-When a user calls `swap_exact_in_for_out` DOT for KSM when a liquidity pool already exists, they first pay a 0.3% fee in the native asset of the chain. The trading fees from each swap are added to the pool for the relevant pair of tokens. This means that, as a liquidity provider, when you withdraw your liquidity, you receive a portion of the transaction fees based on your share of the pool. 
+When a user calls `swap_exact_in_for_out` DOT for KSM when a liquidity pool already exists, they first pay a 1 percent fee in the input token Dot in this case. The trading fees from each swap are added to the pool for the relevant pair of tokens. This means that, as a liquidity provider, when you withdraw your liquidity, you receive a portion of the transaction fees based on your share of the pool. 
 
 Now after paying the fee, how much will the user receive? This is the determined by the constant product formula:
 ```
@@ -38,11 +38,12 @@ lp = sqrt((A+a)*(B+b)) - sqrt(A*B)
 Where `A` is the amount of tokenA in the pool, `B` is the amount of tokenB in the pool, `a` is the amount of tokenA the user is adding, and `b` is the amount of tokenB the user is adding.
 
 #### Removing liquidity
-When a user removes liquidity from an existing pool, the amount of tokens a, b, and f(their share of the fee pool) they receive is calculated by the following formula
+When a user removes liquidity from an existing pool, the amount of tokens a, b, AF, and BF (AF and BF represent the fees collected for each token in the pool) they receive is calculated by the following formula
 ```
 amountA = (amountLP / totalLP) * totalA
 amountB = (amountLP / totalLP) * totalB
-amountF = (amountLP / totalLP) * totalF
+amountAF = (amountLP / totalLP) * totalAF
+amountBF = (amountLP / totalLP) * totalBF
 ```
 
 ## API

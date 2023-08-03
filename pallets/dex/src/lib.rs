@@ -3,11 +3,9 @@
 use frame_support::{
 	pallet_prelude::*, 
 	traits::fungibles,
-	traits::fungibles::{
-		Create, Mutate
-	},
 	sp_runtime::{
 		ArithmeticError,
+		Percent,
 		traits::{
 			CheckedAdd, 
 			CheckedMul, 
@@ -19,6 +17,7 @@ use frame_support::{
 		}
 	}
 };
+
 /// Edit this file to define custom logic or remove it if it is not needed.
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
 /// <https://docs.substrate.io/reference/frame-pallets/>
@@ -78,13 +77,14 @@ pub mod pallet {
 		<T as frame_system::Config>::AccountId,
 	>>::Balance;
 
-	//gives us access to the asset id and balance types of the native currency
-	pub type NativeAssetBalanceOf<T> = <<T as Config>::NativeBalance as fungible::Inspect<
-		<T as frame_system::Config>::AccountId,
-	>>::Balance;
+	// //gives us access to the asset id and balance types of the native currency
+	// pub type NativeAssetBalanceOf<T> = <<T as Config>::NativeBalance as fungible::Inspect<
+	// 	<T as frame_system::Config>::AccountId,
+	// >>::Balance;
 
+	
 	// Stores Pool pairs in sorted order 
-	#[derive(Encode, Decode, MaxEncodedLen, TypeInfo)]
+	#[derive(Encode, Decode, MaxEncodedLen, TypeInfo, Clone)]
 	#[scale_info(skip_type_params(T))]
 	pub struct PoolPair<T: Config> {
 		pub asset_1: AssetIdOf<T>,
@@ -118,16 +118,28 @@ pub mod pallet {
 				})
 			}
 		}
+
+		pub fn default(
+			asset_a: AssetIdOf<T>,
+			asset_b: AssetIdOf<T>,
+		) -> Result<Self, &'static str> {
+			Self::new(
+				asset_a, 
+				AssetBalanceOf::<T>::default(), 
+				asset_b, 
+				AssetBalanceOf::<T>::default()
+			)
+		}
 	}
 
 	#[derive(Encode, Decode, MaxEncodedLen, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
 	pub struct Pool<T: Config> {
-    	// stores the asset ids  and balances of the two assets in the pool in sorted order
+    	// stores the asset ids and balances of the two assets in the pool in sorted order
 		pub pool_pair: PoolPair<T>,
 
-		// stores the amount of fees collected in the pool
-		pub fees: NativeAssetBalanceOf<T>,
+		// stores the asset ids and balances of the fees collected for each asset
+		pub fee_pair: PoolPair<T>,
 		
     	// Total supply of the LP tokens
     	pub lp_supply: AssetBalanceOf<T>,
@@ -138,8 +150,8 @@ pub mod pallet {
 			lp_supply: AssetBalanceOf<T>,
 		) -> Self {
 			Self {
-				pool_pair,
-				fees: NativeAssetBalanceOf::<T>::default(),
+				pool_pair: pool_pair.clone(),
+				fee_pair: PoolPair::<T>::default(pool_pair.asset_1, pool_pair.asset_2).unwrap(),
 				lp_supply,
 			}
 		}
@@ -169,16 +181,23 @@ pub mod pallet {
 		/// Errors should have helpful documentation associated with them.
 		StorageOverflow,
 	}
+	use frame_support::sp_runtime::traits::{
+		CheckedMul,
+		CheckedAdd,
+	};
+	use crate::ArithmeticError;
 	use frame_support::traits::fungibles::{
 		Mutate,
 		Inspect,
 	};
+	use frame_support::traits::tokens::Preservation::*;
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
+		
 
 		#[pallet::call_index(0)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
@@ -191,7 +210,7 @@ pub mod pallet {
 			) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let cur_lp_id = Self::get_lp_id(&asset_a, &asset_b)?;
-			let add_amounts = PoolPair::<T>::new(asset_a, amount_a, asset_b, amount_b)?;
+			let add_amounts = PoolPair::<T>::new(asset_a.clone(), amount_a, asset_b.clone(), amount_b)?;
 			match <PoolMap<T>>::get(&cur_lp_id) {
 				// New Pool
 				None => {
@@ -205,7 +224,6 @@ pub mod pallet {
 					// Create the pool and store it
 					let new_pool = Pool::<T>::new(add_amounts, lp_amount);
 					<PoolMap<T>>::insert(&cur_lp_id, new_pool);
-					Ok(())
 				},
 				Some(existing_pool) => {
 					// Calculate the amount of LP tokens to mint
@@ -216,9 +234,13 @@ pub mod pallet {
 
 					// add to the pool
 					Self::increase_pool(&add_amounts, &cur_lp_id)?;
-					Ok(())
 				},
 			}
+
+			// send the assets to the dex pallet
+			T::Fungibles::transfer(asset_a, &who, &Self::account_id(), amount_a, Expendable)?;
+			T::Fungibles::transfer(asset_b, &who, &Self::account_id(), amount_b, Expendable)?;
+			Ok(())
 		}
 
 		#[pallet::call_index(1)]
@@ -232,14 +254,58 @@ pub mod pallet {
 			let who = ensure_signed(origin)?;
 			// get the LP token id
 			let cur_lp_id = Self::get_lp_id(&asset_a, &asset_b)?;
+
 			// ensure caller has enough LP tokens
 			ensure!(T::Fungibles::balance(cur_lp_id.clone(), &who) >= token_amount, "not enough LP tokens"); // not sure if this is an ok way to propagate the error
+
 			// get the pool
 			let mut pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
 
+			// calculate the amount of each asset to return to the user
+			let amount_1 = pool.pool_pair.amount_1.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
+			let amount_2 = pool.pool_pair.amount_2.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
+			let amount_1_reward = pool.fee_pair.amount_1.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
+			let amount_2_reward = pool.fee_pair.amount_2.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
+			
+			
 
+			// burn the LP tokens
+			
+
+			
+			// burn the LP tokens 
+			// T::Fungibles::burn_from(cur_lp_id.clone(), &who, token_amount,)?;
+			// T::Fungibles::mutate(cur_lp_id.clone(), &Self::account_id(), |balance| *balance -= token_amount)?;
+
+			// return assets to the user 
+			let total_1 = amount_1.checked_add(&amount_1_reward).ok_or(ArithmeticError::Overflow)?;
+			let total_2 = amount_2.checked_add(&amount_2_reward).ok_or(ArithmeticError::Overflow)?;
+			T::Fungibles::transfer(asset_a, &Self::account_id(), &who, total_1, Protect)?;
+			T::Fungibles::transfer(asset_b, &Self::account_id(), &who, total_2, Protect)?;
+			
+			todo!()
+		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
+		pub fn swap_exact_in_for_out(
+			origin: OriginFor<T>,
+			asset_in: AssetIdOf<T>,
+			asset_out: AssetIdOf<T>,
+			exact_in: AssetBalanceOf<T>,
+			min_out: AssetBalanceOf<T>,
+			) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			// get the LP token id
+			let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
+			// get the pool
+			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
+			// calculate the potential fee and insure that user can pay
+
+			
+			// ensure!(amount_out >= min_out, "slippage too high");
 			Ok(())
-		}	
+		}
 	}
 }
 
@@ -302,7 +368,7 @@ impl<T: Config> Pallet<T> {
 		Ok(generated_account)
 	}
 
-	// adds to an existing pool
+	// adds liquidity to an existing pool
 	pub fn increase_pool(
 		new_pair: &PoolPair<T>,
 		pool_id: &AssetIdOf<T>,
@@ -312,6 +378,16 @@ impl<T: Config> Pallet<T> {
 		pool.pool_pair.amount_2 = pool.pool_pair.amount_2.checked_add(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
 		<PoolMap<T>>::insert(pool_id, pool);
 		Ok(())
+	}
+
+	// calculates the amount of fees to be collected
+	// currently we have a hard coded 3% fee
+	pub fn calculate_fees(
+		amount_in: &AssetBalanceOf<T>,
+		pool: &Pool<T>,
+	) -> Result<AssetBalanceOf<T>, DispatchError> {
+		let ten_percent = Percent::from_rational(3u32, 100u32);
+		todo!()
 	}
 
 	
