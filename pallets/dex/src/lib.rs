@@ -136,6 +136,18 @@ pub mod pallet {
 				lp_supply,
 			}
 		}
+
+		// pub fn update(
+		// 	additional_pool_pair: PoolPair<T>,
+		// 	additional_lp_supply: AssetBalanceOf<T>,
+		// ) -> Self {
+		// 	let new_lp_supply = self.lp_supply.checked_add(&additional_lp_supply).ok_or(ArithmeticError::Overflow)?;
+
+		// 	// Self {
+				
+				
+		// 	// }
+		// }
 	}
 
 	#[pallet::storage]
@@ -169,7 +181,6 @@ pub mod pallet {
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		
 		#[pallet::call_index(0)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn add_liquidity(
@@ -185,17 +196,26 @@ pub mod pallet {
 			match <PoolMap<T>>::get(&cur_lp_id) {
 				// New Pool
 				None => {
+					// Calculate the amount of LP tokens to mint
 					let lp_amount = Self::calculate_lp(&add_amounts, None)?;
-					// <T::Fungibles as Create<T::AccountId>>
+
+					// Create the LP token and mint to user
 					T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , false, lp_amount)?;
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
+					
+					// Create the pool and store it
 					let new_pool = Pool::<T>::new(add_amounts, lp_amount);
 					<PoolMap<T>>::insert(&cur_lp_id, new_pool);
 					Ok(())
 				},
-				Some(old) => {
-					// Increment the value read from storage; will error in the event of overflow.
-					// Update the value in storage with the incremented result.
+				Some(existing_pool) => {
+					// Calculate the amount of LP tokens to mint
+					let lp_amount = Self::calculate_lp(&add_amounts, Some(&existing_pool))?;
+
+					// mint to user
+					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
+
+					// update the pool
 					
 					Ok(())
 				},
