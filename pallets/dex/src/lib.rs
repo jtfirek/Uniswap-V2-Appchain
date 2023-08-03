@@ -70,13 +70,16 @@ pub mod pallet {
 
 	/// Types defined here
 
-	// gives us the AssetId type represents the identifier of a fungible asset within a runtime.
+	// gives us access to the asset id and balance types of the fungibles 
 	pub type AssetIdOf<T> = <<T as Config>::Fungibles as fungibles::Inspect<
 	<T as frame_system::Config>::AccountId,
 	>>::AssetId;
-
-
 	pub type AssetBalanceOf<T> = <<T as Config>::Fungibles as fungibles::Inspect<
+		<T as frame_system::Config>::AccountId,
+	>>::Balance;
+
+	//gives us access to the asset id and balance types of the native currency
+	pub type NativeAssetBalanceOf<T> = <<T as Config>::NativeBalance as fungible::Inspect<
 		<T as frame_system::Config>::AccountId,
 	>>::Balance;
 
@@ -122,6 +125,9 @@ pub mod pallet {
 	pub struct Pool<T: Config> {
     	// stores the asset ids  and balances of the two assets in the pool in sorted order
 		pub pool_pair: PoolPair<T>,
+
+		// stores the amount of fees collected in the pool
+		pub fees: NativeAssetBalanceOf<T>,
 		
     	// Total supply of the LP tokens
     	pub lp_supply: AssetBalanceOf<T>,
@@ -133,21 +139,10 @@ pub mod pallet {
 		) -> Self {
 			Self {
 				pool_pair,
+				fees: NativeAssetBalanceOf::<T>::default(),
 				lp_supply,
 			}
 		}
-
-		// pub fn update(
-		// 	additional_pool_pair: PoolPair<T>,
-		// 	additional_lp_supply: AssetBalanceOf<T>,
-		// ) -> Self {
-		// 	let new_lp_supply = self.lp_supply.checked_add(&additional_lp_supply).ok_or(ArithmeticError::Overflow)?;
-
-		// 	// Self {
-				
-				
-		// 	// }
-		// }
 	}
 
 	#[pallet::storage]
@@ -174,13 +169,17 @@ pub mod pallet {
 		/// Errors should have helpful documentation associated with them.
 		StorageOverflow,
 	}
-	use frame_support::traits::fungibles::Mutate;
+	use frame_support::traits::fungibles::{
+		Mutate,
+		Inspect,
+	};
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
+
 		#[pallet::call_index(0)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn add_liquidity(
@@ -215,38 +214,38 @@ pub mod pallet {
 					// mint to user
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
 
-					// update the pool
-					
+					// add to the pool
+					Self::increase_pool(&add_amounts, &cur_lp_id)?;
 					Ok(())
 				},
 			}
-			
 		}
+
+		#[pallet::call_index(1)]
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
+		pub fn remove_liquidity(
+			origin: OriginFor<T>,
+			asset_a: AssetIdOf<T>,
+			asset_b: AssetIdOf<T>,
+			token_amount: AssetBalanceOf<T>,
+			) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			// get the LP token id
+			let cur_lp_id = Self::get_lp_id(&asset_a, &asset_b)?;
+			// ensure caller has enough LP tokens
+			ensure!(T::Fungibles::balance(cur_lp_id.clone(), &who) >= token_amount, "not enough LP tokens"); // not sure if this is an ok way to propagate the error
+			// get the pool
+			let mut pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
+
+
+			Ok(())
+		}	
 	}
 }
 
 
 
 impl<T: Config> Pallet<T> {
-
-	// lp(a, b) == lp(b, a)
-	// idea of logic would be:
-	// 1. the user can submit in any order
-	// 2. we "sort" the assets
-	// 3. then create the id
-	// you need to figure out what you want to return if anything
-	// fn create_asset_pair(
-	// 	asset_a: AssetIdOf<T>,
-	// 	asset_b: AssetIdOf<T>,
-	// ) -> Result<PoolPair<T>, DispatchError> {
-	// 	ensure!(asset_a != asset_b, "cant use the same id twice");
-	// 	return if asset_a.encode() > asset_b.encode() {
-	// 		Ok(PoolPair::new(asset_b, asset_a))
-	// 	} else {
-	// 		Ok(PoolPair::new(asset_a, asset_b))
-	// 	}
-	// }
-
 	// helper function to calculate the amount of LP tokens to mint and issue them 
 	// lp = sqrt((A+a)*(B+b)) - sqrt(A*B) 
 	// Where A and B are the current amount of tokenA and tokenB in the pool. a and b are the amounts of tokenA and tokenB that the user is adding to the pool
@@ -286,13 +285,12 @@ impl<T: Config> Pallet<T> {
 		T::PalletId::get().into_account_truncating()
 	}
 
-
 	// This function assumes asset_a and asset_b have already been sorted
 	pub fn get_lp_id(
 		asset_a: &AssetIdOf<T>,
 		asset_b: &AssetIdOf<T>,
 	) -> Result<AssetIdOf<T>, DispatchError> {
-		let mut bytes;
+		let bytes;
 		ensure!(asset_a != asset_b, "cant use the same id twice");
 		if asset_a.encode() > asset_b.encode() {
 			bytes = T::Hashing::hash(&(asset_b, asset_a).encode());
@@ -304,21 +302,20 @@ impl<T: Config> Pallet<T> {
 		Ok(generated_account)
 	}
 
-	// This function assumes asset_a and asset_b have already been sorted
-	// fn generate_account_from_asset_id_pair(
-	// 	asset_a: AssetIdOf<T>,
-	// 	asset_b: AssetIdOf<T>,
-	// ) -> T::AccountId {
-	// 	let bytes = T::Hashing::hash(&(asset_a, asset_b).encode());
-	// 	let generated_account = T::AccountId::decode(&mut TrailingZeroInput::new(&bytes.encode()))
-	// 		.expect("in our PBA exam, we assume all bytes can be turned into some account id");
-	// 	generated_account
-	// }
+	// adds to an existing pool
+	pub fn increase_pool(
+		new_pair: &PoolPair<T>,
+		pool_id: &AssetIdOf<T>,
+	) -> Result<(), DispatchError> {
+		let mut pool = <PoolMap<T>>::get(pool_id).ok_or(Error::<T>::NoneValue)?;
+		pool.pool_pair.amount_1 = pool.pool_pair.amount_1.checked_add(&new_pair.amount_1).ok_or(ArithmeticError::Overflow)?;
+		pool.pool_pair.amount_2 = pool.pool_pair.amount_2.checked_add(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
+		<PoolMap<T>>::insert(pool_id, pool);
+		Ok(())
+	}
 
-	// you can do the same thing for an asset id if needed...
+	
 }
-
-
 
 
 // Look at `../interface/` to better understand this API.
