@@ -8,9 +8,10 @@ use frame_support::{
 		Percent,
 		traits::{
 			CheckedAdd, 
+			CheckedDiv,
 			CheckedMul, 
-			IntegerSquareRoot, 
 			CheckedSub,
+			IntegerSquareRoot, 
 			AccountIdConversion,
 			Hash,
 			TrailingZeroInput
@@ -137,9 +138,6 @@ pub mod pallet {
 	pub struct Pool<T: Config> {
     	// stores the asset ids and balances of the two assets in the pool in sorted order
 		pub pool_pair: PoolPair<T>,
-
-		// stores the asset ids and balances of the fees collected for each asset
-		pub fee_pair: PoolPair<T>,
 		
     	// Total supply of the LP tokens
     	pub lp_supply: AssetBalanceOf<T>,
@@ -151,7 +149,6 @@ pub mod pallet {
 		) -> Self {
 			Self {
 				pool_pair: pool_pair.clone(),
-				fee_pair: PoolPair::<T>::default(pool_pair.asset_1, pool_pair.asset_2).unwrap(),
 				lp_supply,
 			}
 		}
@@ -178,12 +175,16 @@ pub mod pallet {
 	pub enum Error<T> {
 		/// Error names should be descriptive.
 		NoneValue,
+
 		/// Errors should have helpful documentation associated with them.
 		StorageOverflow,
+
+		// slippage too high
+		SlippageTooHigh,
 	}
 	use frame_support::sp_runtime::traits::{
 		CheckedMul,
-		CheckedAdd,
+		CheckedSub
 	};
 	use crate::ArithmeticError;
 	use frame_support::traits::fungibles::{
@@ -191,6 +192,9 @@ pub mod pallet {
 		Inspect,
 	};
 	use frame_support::traits::tokens::Preservation::*;
+	use frame_support::traits::tokens::Precision::BestEffort;
+	use frame_support::traits::tokens::Fortitude::Force;
+
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
@@ -233,7 +237,7 @@ pub mod pallet {
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
 
 					// add to the pool
-					Self::increase_pool(&add_amounts, &cur_lp_id)?;
+					Self::increase_pool(&add_amounts, &lp_amount, &cur_lp_id)?;
 				},
 			}
 
@@ -264,26 +268,17 @@ pub mod pallet {
 			// calculate the amount of each asset to return to the user
 			let amount_1 = pool.pool_pair.amount_1.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
 			let amount_2 = pool.pool_pair.amount_2.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
-			let amount_1_reward = pool.fee_pair.amount_1.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
-			let amount_2_reward = pool.fee_pair.amount_2.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
 			
-			
+			//burn the LP tokens 
+			T::Fungibles::burn_from(cur_lp_id.clone(), &who, token_amount, BestEffort, Force)?;
 
-			// burn the LP tokens
+			// update the pool
+			Self::decrease_pool(&amount_1, &amount_2, &token_amount, &cur_lp_id)?;
 			
-
-			
-			// burn the LP tokens 
-			// T::Fungibles::burn_from(cur_lp_id.clone(), &who, token_amount,)?;
-			// T::Fungibles::mutate(cur_lp_id.clone(), &Self::account_id(), |balance| *balance -= token_amount)?;
-
-			// return assets to the user 
-			let total_1 = amount_1.checked_add(&amount_1_reward).ok_or(ArithmeticError::Overflow)?;
-			let total_2 = amount_2.checked_add(&amount_2_reward).ok_or(ArithmeticError::Overflow)?;
-			T::Fungibles::transfer(asset_a, &Self::account_id(), &who, total_1, Protect)?;
-			T::Fungibles::transfer(asset_b, &Self::account_id(), &who, total_2, Protect)?;
-			
-			todo!()
+			// return assets to the user
+			T::Fungibles::transfer(asset_a, &Self::account_id(), &who, amount_1, Protect)?;
+			T::Fungibles::transfer(asset_b, &Self::account_id(), &who, amount_2, Protect)?;
+			Ok(())
 		}
 
 		#[pallet::call_index(2)]
@@ -298,12 +293,28 @@ pub mod pallet {
 			let who = ensure_signed(origin)?;
 			// get the LP token id
 			let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
+
 			// get the pool
 			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
-			// calculate the potential fee and insure that user can pay
 
-			
-			// ensure!(amount_out >= min_out, "slippage too high");
+			// calculate the potential fee 
+			let fee = Self::calculate_fees(&exact_in)?; // 3 percent fee
+			let exact_in_after_fee = exact_in.checked_sub(&fee).ok_or(ArithmeticError::Underflow)?;
+
+			// calculate the amount of asset_out
+			let amount_out = Self::calculate_out(&exact_in_after_fee, &asset_in, &pool)?;
+
+			if amount_out < min_out {
+				return Err(Error::<T>::SlippageTooHigh.into())
+			}
+
+			// trade is good transfer assets accordingly 
+			T::Fungibles::transfer(asset_in, &who, &Self::account_id(), exact_in, Expendable)?;
+			T::Fungibles::transfer(asset_out, &Self::account_id(), &who, amount_out, Protect)?;
+
+			// update the pool
+
+
 			Ok(())
 		}
 	}
@@ -371,11 +382,28 @@ impl<T: Config> Pallet<T> {
 	// adds liquidity to an existing pool
 	pub fn increase_pool(
 		new_pair: &PoolPair<T>,
+		new_lp: &AssetBalanceOf<T>,
 		pool_id: &AssetIdOf<T>,
 	) -> Result<(), DispatchError> {
 		let mut pool = <PoolMap<T>>::get(pool_id).ok_or(Error::<T>::NoneValue)?;
 		pool.pool_pair.amount_1 = pool.pool_pair.amount_1.checked_add(&new_pair.amount_1).ok_or(ArithmeticError::Overflow)?;
 		pool.pool_pair.amount_2 = pool.pool_pair.amount_2.checked_add(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
+		pool.lp_supply = pool.lp_supply.checked_add(&new_lp).ok_or(ArithmeticError::Overflow)?;
+		<PoolMap<T>>::insert(pool_id, pool);
+		Ok(())
+	}
+
+	// removes liquidity from an existing pool
+	pub fn decrease_pool(
+		amount_1: &AssetBalanceOf<T>,
+		amount_2: &AssetBalanceOf<T>,
+		new_lp: &AssetBalanceOf<T>,
+		pool_id: &AssetIdOf<T>,
+	) -> Result<(), DispatchError> {
+		let mut pool = <PoolMap<T>>::get(pool_id).ok_or(Error::<T>::NoneValue)?;
+		pool.pool_pair.amount_1 = pool.pool_pair.amount_1.checked_sub(&amount_1).ok_or(ArithmeticError::Underflow)?;
+		pool.pool_pair.amount_2 = pool.pool_pair.amount_2.checked_sub(&amount_2).ok_or(ArithmeticError::Underflow)?;
+		pool.lp_supply = pool.lp_supply.checked_sub(&new_lp).ok_or(ArithmeticError::Underflow)?;
 		<PoolMap<T>>::insert(pool_id, pool);
 		Ok(())
 	}
@@ -384,12 +412,39 @@ impl<T: Config> Pallet<T> {
 	// currently we have a hard coded 3% fee
 	pub fn calculate_fees(
 		amount_in: &AssetBalanceOf<T>,
-		pool: &Pool<T>,
 	) -> Result<AssetBalanceOf<T>, DispatchError> {
 		let ten_percent = Percent::from_rational(3u32, 100u32);
-		todo!()
+		Ok(ten_percent.mul_ceil(*amount_in))
 	}
 
+	// calculates the output of the exchange based on constant product formula
+	// X * Y = K
+	pub fn calculate_out(
+		amount_in: &AssetBalanceOf<T>,
+		input_type: &AssetIdOf<T>,
+		pool: &Pool<T>,
+	) -> Result<AssetBalanceOf<T>, DispatchError> {
+		// get the constant k
+		let k = pool.pool_pair.amount_1.checked_mul(&pool.pool_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
+		let input_pool;
+		let output_pool;
+		if *input_type == pool.pool_pair.asset_1  {
+			input_pool = pool.pool_pair.amount_1;
+			output_pool = pool.pool_pair.amount_2;
+		} else {
+			input_pool = pool.pool_pair.amount_2;
+			output_pool = pool.pool_pair.amount_1;
+		}
+		// New X value after adding to the pool
+		let new_input_pool = input_pool.checked_add(&amount_in).ok_or(ArithmeticError::Overflow)?;
+		// Y = K / X : New Y value after adding to the pool
+		let new_output_pool = k.checked_div(&new_input_pool).unwrap(); 
+
+		// Y - old Y = output
+		let output = new_output_pool.checked_sub(&output_pool).ok_or(ArithmeticError::Underflow)?;
+
+		Ok(output)
+	}
 	
 }
 

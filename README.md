@@ -38,12 +38,10 @@ lp = sqrt((A+a)*(B+b)) - sqrt(A*B)
 Where `A` is the amount of tokenA in the pool, `B` is the amount of tokenB in the pool, `a` is the amount of tokenA the user is adding, and `b` is the amount of tokenB the user is adding.
 
 #### Removing liquidity
-When a user removes liquidity from an existing pool, the amount of tokens a, b, AF, and BF (AF and BF represent the fees collected for each token in the pool) they receive is calculated by the following formula
+When a user removes liquidity from an existing pool, the amount of tokens a and b they receive is calculated by the following formula. 
 ```
 amountA = (amountLP / totalLP) * totalA
 amountB = (amountLP / totalLP) * totalB
-amountAF = (amountLP / totalLP) * totalAF
-amountBF = (amountLP / totalLP) * totalBF
 ```
 
 ## API
