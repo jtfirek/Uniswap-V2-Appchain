@@ -304,19 +304,42 @@ pub mod pallet {
 			// calculate the amount of asset_out
 			let amount_out = Self::calculate_out(&exact_in_after_fee, &asset_in, &pool)?;
 
-			if amount_out < min_out {
+			if amount_out.0 < min_out {
 				return Err(Error::<T>::SlippageTooHigh.into())
 			}
 
 			// trade is good transfer assets accordingly 
 			T::Fungibles::transfer(asset_in, &who, &Self::account_id(), exact_in, Expendable)?;
-			T::Fungibles::transfer(asset_out, &Self::account_id(), &who, amount_out, Protect)?;
+			T::Fungibles::transfer(asset_out, &Self::account_id(), &who, amount_out.0, Protect)?;
 
 			// update the pool
+			<PoolMap<T>>::insert(&cur_lp_id, amount_out.1);
+			Ok(())
+		}
 
+
+		#[pallet::call_index(3)]
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
+		pub fn swap_in_for_exact_out(
+			origin: OriginFor<T>,
+			asset_in: AssetIdOf<T>,
+			asset_out: AssetIdOf<T>,
+			max_in: AssetBalanceOf<T>,
+			exact_out: AssetBalanceOf<T>,
+			) -> DispatchResult {
+			// let who = ensure_signed(origin)?;
+			// // get the LP token id
+			// let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
+
+			// // get the pool
+			// let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
+
+			// // calculate the potential fee 
 
 			Ok(())
 		}
+
+
 	}
 }
 
@@ -419,11 +442,12 @@ impl<T: Config> Pallet<T> {
 
 	// calculates the output of the exchange based on constant product formula
 	// X * Y = K
+	// returns both the output and the new pool
 	pub fn calculate_out(
 		amount_in: &AssetBalanceOf<T>,
 		input_type: &AssetIdOf<T>,
 		pool: &Pool<T>,
-	) -> Result<AssetBalanceOf<T>, DispatchError> {
+	) -> Result<(AssetBalanceOf<T>, Pool<T>), DispatchError> {
 		// get the constant k
 		let k = pool.pool_pair.amount_1.checked_mul(&pool.pool_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
 		let input_pool;
@@ -443,9 +467,39 @@ impl<T: Config> Pallet<T> {
 		// Y - old Y = output
 		let output = new_output_pool.checked_sub(&output_pool).ok_or(ArithmeticError::Underflow)?;
 
-		Ok(output)
+		let new_pool: Pool<T>;
+		if *input_type == pool.pool_pair.asset_1  {
+			new_pool = Pool::<T>::new(
+				PoolPair::<T>::new(
+					pool.pool_pair.asset_1.clone(),
+					new_input_pool,
+					pool.pool_pair.asset_2.clone(),
+					new_output_pool,
+				)?,
+				pool.lp_supply,
+			);
+		} else {
+			new_pool = Pool::<T>::new(
+				PoolPair::<T>::new(
+					pool.pool_pair.asset_1.clone(),
+					new_output_pool,
+					pool.pool_pair.asset_2.clone(),
+					new_input_pool,
+				)?,
+				pool.lp_supply,
+			);
+		} 
+		Ok((output, new_pool))
 	}
+
+	// calculates the input of the exchange based on constant product formula
+	// X * Y = K
+	// returns both the input and the new pool
+	// pub fn calculate_in()
+
 	
+
+
 }
 
 
@@ -476,7 +530,7 @@ impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 	}
 
 	fn lp_id(_asset_a: Self::AssetId, _asset_b: Self::AssetId) -> Self::AssetId {
-		unimplemented!()
+		Self::get_lp_id(&_asset_a, &_asset_b).unwrap()
 	}
 
 	fn add_liquidity(
@@ -486,7 +540,7 @@ impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 		_amount_a: Self::AssetBalance,
 		_amount_b: Self::AssetBalance,
 	) -> DispatchResult {
-		unimplemented!()
+		Self::add_liquidity(frame_system::RawOrigin::Signed(_who).into(), _asset_a, _asset_b, _amount_a, _amount_b)
 	}
 
 	fn remove_liquidity(
@@ -495,7 +549,7 @@ impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 		_asset_b: Self::AssetId,
 		_token_amount: Self::AssetBalance,
 	) -> DispatchResult {
-		unimplemented!()
+		Self::remove_liquidity(frame_system::RawOrigin::Signed(_who).into(), _asset_a, _asset_b, _token_amount)
 	}
 
 	fn swap_exact_in_for_out(
@@ -505,7 +559,7 @@ impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 		_exact_in: Self::AssetBalance,
 		_min_out: Self::AssetBalance,
 	) -> DispatchResult {
-		unimplemented!()
+		Self::swap_exact_in_for_out(frame_system::RawOrigin::Signed(_who).into(), _asset_in, _asset_out, _exact_in, _min_out)
 	}
 
 	fn swap_in_for_exact_out(
@@ -515,6 +569,6 @@ impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 		_max_in: Self::AssetBalance,
 		_exact_out: Self::AssetBalance,
 	) -> DispatchResult {
-		unimplemented!()
+		Self::swap_in_for_exact_out(frame_system::RawOrigin::Signed(_origin).into(), _asset_in, _asset_out, _max_in, _exact_out)
 	}
 }
