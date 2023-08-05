@@ -54,7 +54,7 @@ Here are the extrinsics functions that are available to be called by users to in
 You may construct these transactions directly through JavaScript or with the Polkadot.js API
 
 #### [`add_liquidity`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L229)
-**Description:** Adds liquidity to a pool on behalf of the user. If necessary, this will create the pool. LP tokens are minted to the caller.
+**Description:** Adds liquidity to a pool on behalf of the user. If necessary, this will create the pool. LP tokens are minted to the caller.  
 **Call index**: 0
 #### Signature:
 ```rust
@@ -69,7 +69,7 @@ amount_b: AssetBalanceOf<T>,
 <br>
 
 #### [`remove_liquidity`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L267)
-**Description:** Removes liquidity from a pool on behalf of the user. The token_amount represents the amount of LP tokens to be burned in exchange for underlying assets.
+**Description:** Removes liquidity from a pool on behalf of the user. The token_amount represents the amount of LP tokens to be burned in exchange for underlying assets.  
 **Call index**: 1
 #### Signature:
 ```rust
@@ -83,7 +83,7 @@ token_amount: AssetBalanceOf<T>,
 <br>
 
 #### [`Swap_exact_in_for_out`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L296)
-**Description:** Swaps an exact amount of asset_in for a minimum amount of asset_out on behalf of who. The swap fee is deducted from the out amount.
+**Description:** Swaps an exact amount of asset_in for a minimum amount of asset_out on behalf of who. The swap fee is deducted from the out amount.  
 **Call index**: 2
 #### Signature:
 ```rust
@@ -98,7 +98,7 @@ min_out: AssetBalanceOf<T>,
 <br>
 
 #### [`Swap_in_for_exact_out`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L325)
-**Description:** Swaps a max amount of asset_in for an exact amount of asset_out on behalf of who. The swap fee is added to the in amount.
+**Description:** Swaps a max amount of asset_in for an exact amount of asset_out on behalf of who. The swap fee is added to the in amount.  
 **Call index**: 3
 #### Signature:
 ```rust
@@ -113,7 +113,7 @@ exact_out: AssetBalanceOf<T>,
 <br>
 
 #### [`price_oracle`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L354)
-**Description:** Emits an event with a percentage representing the current exchange rate between asset_in and asset_out.
+**Description:** Emits an event with a percentage representing the current exchange rate between asset_in and asset_out.  
 **Call index**: 4
 #### Signature:
 ```rust
@@ -126,7 +126,7 @@ asset_out: AssetIdOf<T>,
 <br>
 
 #### [`set_fee`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L375)
-**Description:** Sets the fee for the DEX pallet. Each input represents 100 basis points. An input of 4 would yield a fee of 400 basis points or 4 percent. The fee can **Only** be set by the origin that is configured in the runtime.
+**Description:** Sets the fee for the DEX pallet. Each input represents 100 basis points. An input of 4 would yield a fee of 400 basis points or 4 percent. The fee can **Only** be set by the origin that is configured in the runtime.  
 **Call index**: 5
 #### Signature:
 ```rust
