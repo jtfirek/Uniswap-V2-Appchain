@@ -14,10 +14,17 @@ use frame_support::{
 			IntegerSquareRoot, 
 			AccountIdConversion,
 			Hash,
-			TrailingZeroInput
+			TrailingZeroInput,
+			One,
 		}
 	}
 };
+
+use frame_support::traits::fungibles::Mutate;
+use frame_support::traits::fungibles::Create;
+use frame_support::traits::fungibles::Inspect;
+use frame_support::dispatch::Vec;
+
 
 /// Edit this file to define custom logic or remove it if it is not needed.
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
@@ -35,7 +42,6 @@ mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet {
-	use core::f32::consts::E;
 
 use frame_support::{
 		pallet_prelude::*,
@@ -171,6 +177,18 @@ use frame_support::{
 		/// parameters. [something, who]
 		SomethingStored { something: u32, who: T::AccountId },
 
+		// Liquidity added to the pool
+		LiquidityAdded { 
+			asset_a: AssetIdOf<T>, 
+			asset_b: AssetIdOf<T>, 
+			amount_a: AssetBalanceOf<T>, 
+			amount_b: AssetBalanceOf<T>,
+			amount_lp: AssetBalanceOf<T>,
+	  },
+
+		// Liquidity removed from the pool
+		LiquidityRemoved { asset_a: AssetIdOf<T>, asset_b: AssetIdOf<T>, amount_a: AssetBalanceOf<T>, amount_b: AssetBalanceOf<T> },
+
 		// Event emitted from the price oracle
 		PriceOracleEvent { price: AssetBalanceOf<T>, asset_a: AssetIdOf<T>, asset_b: AssetIdOf<T> },
 	}
@@ -189,7 +207,6 @@ use frame_support::{
 	}
 	use frame_support::sp_runtime::traits::{
 		CheckedMul,
-		CheckedSub,
 		CheckedDiv
 	};
 	use crate::ArithmeticError;
@@ -221,14 +238,15 @@ use frame_support::{
 			let who = ensure_signed(origin)?;
 			let cur_lp_id = Self::get_lp_id(&asset_a, &asset_b)?;
 			let add_amounts = PoolPair::<T>::new(asset_a.clone(), amount_a, asset_b.clone(), amount_b)?;
+			let mut lp_amount = AssetBalanceOf::<T>::default();
 			match <PoolMap<T>>::get(&cur_lp_id) {
 				// New Pool
 				None => {
 					// Calculate the amount of LP tokens to mint
-					let lp_amount = Self::calculate_lp(&add_amounts, None)?;
+					lp_amount = Self::calculate_lp(&add_amounts, None)?;
 
 					// Create the LP token and mint to user
-					T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , false, lp_amount)?;
+					T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , true, lp_amount)?;
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
 					
 					// Create the pool and store it
@@ -237,7 +255,7 @@ use frame_support::{
 				},
 				Some(existing_pool) => {
 					// Calculate the amount of LP tokens to mint
-					let lp_amount = Self::calculate_lp(&add_amounts, Some(&existing_pool))?;
+					lp_amount = Self::calculate_lp(&add_amounts, Some(&existing_pool))?;
 
 					// mint to user
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
@@ -248,8 +266,10 @@ use frame_support::{
 			}
 
 			// send the assets to the dex pallet
-			T::Fungibles::transfer(asset_a, &who, &Self::account_id(), amount_a, Expendable)?;
-			T::Fungibles::transfer(asset_b, &who, &Self::account_id(), amount_b, Expendable)?;
+			T::Fungibles::transfer(asset_a.clone(), &who, &Self::account_id(), amount_a, Expendable)?;
+			T::Fungibles::transfer(asset_b.clone(), &who, &Self::account_id(), amount_b, Expendable)?;
+
+			Self::deposit_event(Event::LiquidityAdded { asset_a, asset_b, amount_a, amount_b, amount_lp: lp_amount });
 			Ok(())
 		}
 
@@ -269,7 +289,7 @@ use frame_support::{
 			ensure!(T::Fungibles::balance(cur_lp_id.clone(), &who) >= token_amount, "not enough LP tokens"); // not sure if this is an ok way to propagate the error
 
 			// get the pool
-			let mut pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
+			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
 
 			// calculate the amount of each asset to return to the user
 			let amount_1 = pool.pool_pair.amount_1.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
@@ -282,8 +302,10 @@ use frame_support::{
 			Self::decrease_pool(&amount_1, &amount_2, &token_amount, &cur_lp_id)?;
 			
 			// return assets to the user
-			T::Fungibles::transfer(asset_a, &Self::account_id(), &who, amount_1, Protect)?;
-			T::Fungibles::transfer(asset_b, &Self::account_id(), &who, amount_2, Protect)?;
+			T::Fungibles::transfer(pool.pool_pair.asset_1, &Self::account_id(), &who, amount_1, Expendable)?;
+			T::Fungibles::transfer(pool.pool_pair.asset_2, &Self::account_id(), &who, amount_2, Expendable)?;
+
+			Self::deposit_event(Event::LiquidityRemoved { asset_a, asset_b, amount_a: amount_1, amount_b: amount_2 });
 			Ok(())
 		}
 
@@ -586,7 +608,23 @@ impl<T: Config> Pallet<T> {
 
 	}
 
-	
+	// function for setting up accounts while testing
+	pub fn setup_account(
+		who: T::AccountId,
+		assets: Vec<(AssetIdOf<T>, AssetBalanceOf<T>)>,
+	) -> DispatchResult {
+
+		for (asset_id, asset_balance) in assets {
+			if !T::Fungibles::asset_exists(asset_id.clone()) {
+				let pallet_account = Self::account_id();
+				T::Fungibles::create(asset_id.clone(), pallet_account, true, One::one())?;
+			}
+
+			T::Fungibles::mint_into(asset_id.clone(), &who, asset_balance)?;
+		}
+
+		Ok(())
+	}
 
 
 }

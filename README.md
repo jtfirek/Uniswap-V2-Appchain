@@ -1,5 +1,7 @@
 # Uniswap V2 Style DEX Pallet
 
+ mint the tokens into an lp account 
+
 This DEX (Decentralized Exchange) Pallet is based on the Uniswap V2 design and allows users to trustlessly exchange tokens. It is implemented as a Substrate runtime pallet.
 
 The DEX includes functionality to incentivize users to create liquidity pools and also provides a price oracle based on the existing liquidity pools. 
