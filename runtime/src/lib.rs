@@ -320,6 +320,7 @@ impl pallet_dex::Config for Runtime {
 	type NativeBalance = Balances;
 	type Fungibles = Assets;
 	type PalletId = DexPalletId;
+	type PermissionedOrigin = EnsureRoot<AccountId>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

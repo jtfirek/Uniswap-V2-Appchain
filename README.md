@@ -1,15 +1,15 @@
 # Uniswap V2 Style DEX Pallet
 
- mint the tokens into an lp account 
 
-This DEX (Decentralized Exchange) Pallet is based on the Uniswap V2 design and allows users to trustlessly exchange tokens. It is implemented as a Substrate runtime pallet.
-
-The DEX includes functionality to incentivize users to create liquidity pools and also provides a price oracle based on the existing liquidity pools. 
+This DEX (Decentralized Exchange) Pallet is based on the Uniswap V2 design and allows users to trustlessly exchange tokens.
+The DEX includes functionality to incentivize users to create liquidity pools and also provides a price oracle based on the existing liquidity pools.
+The swap fee has a default value of 3 percent, but the pallet provides an the extrinsic `set_fee` to allow the fee to be changed. 
+When configuring the runtime, the origin that has permission to set the fee must be set.
 
 ## How it works 
 
 ### Swaps
-When a user calls `swap_exact_in_for_out` DOT for KSM when a liquidity pool already exists, they first pay a 1 percent fee in the input token Dot in this case. The trading fees from each swap are added to the pool for the relevant pair of tokens. This means that, as a liquidity provider, when you withdraw your liquidity, you receive a portion of the transaction fees based on your share of the pool. 
+When a user calls `swap_exact_in_for_out` DOT for KSM when a liquidity pool already exists, they first pay a fee in the input token Dot in this case. The trading fees from each swap are added to the pool for the relevant pair of tokens. This means that, as a liquidity provider, when you withdraw your liquidity, you receive a portion of the transaction fees based on your share of the pool. 
 
 Now after paying the fee, how much will the user receive? This is the determined by the constant product formula:
 ```
@@ -18,10 +18,11 @@ X * Y = K
 This means that the product K of the reserves of the two tokens in the pool must remain constant. This is calculated by balancing the following equation `X * Y = newX * newY`.
 
 ### Price oracle 
-The current exchange rate between tokenA and tokenB not including fees is computed by dividing the reserve assets of tokenA with reserve assets of tokenB. This is done in the `price_oracle` function.
+The current exchange rate between an input toke and an output token is determined by the following formula:
 ```
-Price = reserveA / reserveB
+ratio = output / input
 ```
+Divides the amount of tokens in the output pool by the amount of tokens in the input pool and returns a percentage as the result
 
 ### LP token math
 This is the math that is used to ensure a fair distribution of liquidity provider (LP) tokens based on the amount of liquidity provided. 
@@ -52,7 +53,7 @@ The pallet exposes the following API. All methods are called on an instance of t
 
 
 #### [`price_oracle`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/335e76986a7fffdde5eac6a2cfc4dd37415126db/pallets/interface/src/lib.rs#L54)
-**Description:** Returns the price of asset_out in terms of asset_in. The price is expressed as a ratio of asset_in to asset_out.
+**Description:** Emits an event that with a percentage representing the current exchange rate between asset_in and asset_out.
 
 #### Signature:
 ```rust

@@ -45,6 +45,7 @@ use frame_support::{
 			CheckedDiv,
 			CheckedMul,
 		},
+		sp_runtime::Percent,
 		traits::{
 			fungibles::{Inspect, Mutate},
 			tokens::{Preservation::*, Precision::BestEffort, Fortitude::Force},
@@ -72,6 +73,8 @@ use frame_support::{
 		type Fungibles: fungibles::Inspect<Self::AccountId> 
 			+ fungibles::Mutate<Self::AccountId>
 			+ fungibles::Create<Self::AccountId>;
+
+		type PermissionedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
 		/// The DEXs pallet id, used for deriving its sovereign account ID.
 		#[pallet::constant]
@@ -187,9 +190,13 @@ use frame_support::{
 		// Liquidity removed from the pool
 		LiquidityRemoved { asset_a: AssetIdOf<T>, asset_b: AssetIdOf<T>, amount_a: AssetBalanceOf<T>, amount_b: AssetBalanceOf<T> },
 
-		// Event emitted from the price oracle
-		PriceOracleEvent { price: AssetBalanceOf<T>, asset_a: AssetIdOf<T>, asset_b: AssetIdOf<T> },
+		// exchange rate between represented as a percent `asset_out` / `asset_in`
+		PriceOracleEvent { rate: Percent, asset_in: AssetIdOf<T>, asset_out: AssetIdOf<T> },
+
+		// Swap event
+		SwapEvent { asset_in: AssetIdOf<T>, asset_out: AssetIdOf<T>, amount_in: AssetBalanceOf<T>, amount_out: AssetBalanceOf<T>, }
 	}
+
 	#[pallet::error]
 	pub enum Error<T> {
 		/// Error names should be descriptive.
@@ -203,11 +210,18 @@ use frame_support::{
 
 		// Trying to access a pool that doesn't exist
 		NoPool,
+
+		// insufficient lp balance
+		InsufficientLPBalance,
 	}
 
 	/// DISPATCHABLE FUNCTIONS DEFINED HERE
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
+
+		/// Initiates a request to add liquidity to a specific pool pair.
+    	/// If the pool does not exist, it is created and the initial liquidity provided is minted.
+    	/// If the pool does exist, the function calculates the additional liquidity to be minted and adds it to the pool.
 		#[pallet::call_index(0)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn add_liquidity(
@@ -223,24 +237,19 @@ use frame_support::{
 			let lp_amount;
 			match <PoolMap<T>>::get(&cur_lp_id) {
 				None => { // New Pool
-					// create and mint the new tokens
 					lp_amount = Self::calculate_lp(&add_amounts, None)?;
 					T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , true, lp_amount)?;
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
-					
-					// Create the pool and store them
 					let new_pool = Pool::<T>::new(add_amounts, lp_amount);
 					<PoolMap<T>>::insert(&cur_lp_id, new_pool);
 				},
 				Some(existing_pool) => {
-					// get amount of addition LP tokens to mint and add to the pool
 					lp_amount = Self::calculate_lp(&add_amounts, Some(&existing_pool))?;
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
 					Self::increase_pool(&add_amounts, &lp_amount, &cur_lp_id)?;
 				},
 			}
 
-			// send the assets to the dex pallet
 			T::Fungibles::transfer(asset_a.clone(), &who, &Self::account_id(), amount_a, Expendable)?;
 			T::Fungibles::transfer(asset_b.clone(), &who, &Self::account_id(), amount_b, Expendable)?;
 
@@ -248,6 +257,9 @@ use frame_support::{
 			Ok(())
 		}
 
+		/// Removes liquidity from a given pool pair by burning LP tokens.
+    	/// The function checks the balance of the LP tokens, calculates the amount of each asset to return,
+    	/// burns the LP tokens, updates the pool, and then returns assets to the user.
 		#[pallet::call_index(1)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn remove_liquidity(
@@ -257,26 +269,16 @@ use frame_support::{
 			token_amount: AssetBalanceOf<T>,
 			) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			// get the LP token id
 			let cur_lp_id = Self::get_lp_id(&asset_a, &asset_b)?;
+			ensure!(T::Fungibles::balance(cur_lp_id.clone(), &who) >= token_amount, Error::<T>::InsufficientLPBalance);
 
-			// ensure caller has enough LP tokens
-			ensure!(T::Fungibles::balance(cur_lp_id.clone(), &who) >= token_amount, "not enough LP tokens"); // not sure if this is an ok way to propagate the error
-
-			// get the pool
 			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoPool)?;
-
-			// calculate the amount of each asset to return to the user
 			let amount_1 = pool.pool_pair.amount_1.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
 			let amount_2 = pool.pool_pair.amount_2.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
 			
-			//burn the LP tokens 
-			T::Fungibles::burn_from(cur_lp_id.clone(), &who, token_amount, BestEffort, Force)?;
-
-			// update the pool
-			Self::decrease_pool(&amount_1, &amount_2, &token_amount, &cur_lp_id)?;
 			
-			// return assets to the user
+			T::Fungibles::burn_from(cur_lp_id.clone(), &who, token_amount, BestEffort, Force)?;
+			Self::decrease_pool(&amount_1, &amount_2, &token_amount, &cur_lp_id)?;
 			T::Fungibles::transfer(pool.pool_pair.asset_1, &Self::account_id(), &who, amount_1, Expendable)?;
 			T::Fungibles::transfer(pool.pool_pair.asset_2, &Self::account_id(), &who, amount_2, Expendable)?;
 
@@ -284,6 +286,9 @@ use frame_support::{
 			Ok(())
 		}
 
+		/// Performs an asset swap, providing an exact quantity of one asset to receive another. 
+    	/// The function retrieves the liquidity pool, calculates the output amount, and performs a slippage check.
+   		/// If the trade is viable, it transfers the assets and updates the pool.
 		#[pallet::call_index(2)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn swap_exact_in_for_out(
@@ -294,29 +299,25 @@ use frame_support::{
 			min_out: AssetBalanceOf<T>,
 			) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			// get the LP token id
 			let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
-
-			// get the pool
 			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
 
-			// calculate the amount of asset_out
 			let amount_out = Self::calculate_out(&exact_in, &asset_in, &pool)?;
-
 			if amount_out.0 < min_out {
 				return Err(Error::<T>::SlippageTooHigh.into())
 			}
 
-			// trade is good transfer assets accordingly 
-			T::Fungibles::transfer(asset_in, &who, &Self::account_id(), exact_in, Expendable)?;
-			T::Fungibles::transfer(asset_out, &Self::account_id(), &who, amount_out.0, Protect)?;
-
-			// update the pool
+			T::Fungibles::transfer(asset_in.clone(), &who, &Self::account_id(), exact_in, Expendable)?;
+			T::Fungibles::transfer(asset_out.clone(), &Self::account_id(), &who, amount_out.0, Protect)?;
 			<PoolMap<T>>::insert(&cur_lp_id, amount_out.1);
+
+			Self::deposit_event(Event::SwapEvent { asset_in, asset_out, amount_in: exact_in, amount_out: amount_out.0 });
 			Ok(())
 		}
 
-
+		/// Performs an asset swap aiming for an exact output amount, while allowing for a maximum input. 
+    	/// The function retrieves the liquidity pool, calculates the potential input based on required output, 
+    	/// checks for slippage, performs asset transfers if the trade is viable, and updates the pool.
 		#[pallet::call_index(3)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn swap_in_for_exact_out(
@@ -327,26 +328,22 @@ use frame_support::{
 			exact_out: AssetBalanceOf<T>,
 			) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			// get the LP token and the pool
 			let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
 			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
 
-			// get the potential input based of the required output
 			let amount_in = Self::calculate_in(&exact_out, &asset_out, &pool)?;
-
 			if amount_in.0 > max_in {
 				return Err(Error::<T>::SlippageTooHigh.into())
 			}
 
 			// trade is good transfer assets accordingly
-			T::Fungibles::transfer(asset_in, &who, &Self::account_id(), amount_in.0, Protect)?;
-			T::Fungibles::transfer(asset_out, &Self::account_id(), &who, exact_out, Expendable)?;
-
-			// update the pool
+			T::Fungibles::transfer(asset_in.clone(), &who, &Self::account_id(), amount_in.0, Protect)?;
+			T::Fungibles::transfer(asset_out.clone(), &Self::account_id(), &who, exact_out, Expendable)?;
 			<PoolMap<T>>::insert(&cur_lp_id, amount_in.1);
+
+			Self::deposit_event(Event::SwapEvent { asset_in, asset_out, amount_in: amount_in.0, amount_out: exact_out });
 			Ok(())
 		}
-
 
 		/// This function computes the price ratio between `asset_in` and `asset_out` using the 
 		/// available liquidity pool.
@@ -357,17 +354,28 @@ use frame_support::{
 			asset_in: AssetIdOf<T>,
 			asset_out: AssetIdOf<T>,
 			) -> DispatchResult {
-			// get the LP pool or propagate error if the pool for that pair doesn't exist
 			let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
 			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoPool)?;
 
 			let oracle_price;
 			if asset_in == pool.pool_pair.asset_1 {
-				oracle_price = pool.pool_pair.amount_2.checked_div(&pool.pool_pair.amount_1).ok_or(ArithmeticError::Underflow)?;
+				oracle_price = Percent::from_rational(pool.pool_pair.amount_2, pool.pool_pair.amount_1);
 			} else {
-				oracle_price = pool.pool_pair.amount_1.checked_div(&pool.pool_pair.amount_2).ok_or(ArithmeticError::Underflow)?;
-			}
-			Self::deposit_event(Event::PriceOracleEvent { price: oracle_price, asset_a: asset_in, asset_b: asset_out });
+				oracle_price = Percent::from_rational(pool.pool_pair.amount_1, pool.pool_pair.amount_2);
+			};
+			Self::deposit_event(Event::PriceOracleEvent { rate: oracle_price, asset_in: asset_in, asset_out: asset_out });
+			Ok(())
+		}
+
+		/// This function allows the owner to change the fee percentage.
+		#[pallet::call_index(5)]
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
+		pub fn set_fee(
+			origin: OriginFor<T>,
+			new_fee: u16,
+			) -> DispatchResult {
+			T::PermissionedOrigin::ensure_origin(origin)?;
+			<Fee<T>>::put(new_fee);
 			Ok(())
 		}
 	}
@@ -382,8 +390,7 @@ impl<T: Config> Pallet<T> {
 		new_pair: &PoolPair<T>,
 		pool: Option<&Pool<T>>,
 	) -> Result<AssetBalanceOf<T>, DispatchError> {
-		if let Some(pool) = pool {
-			// Calculate LP for existing pool: sqrt((A + a) * (B + b)) - sqrt(A * B)
+		if let Some(pool) = pool { // Calculate LP for existing pool
 			let total_1 = pool.pool_pair.amount_1.checked_add(&new_pair.amount_1).ok_or(ArithmeticError::Overflow)?;
 			let total_2 = pool.pool_pair.amount_2.checked_add(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
 			let total_product = total_1.checked_mul(&total_2).ok_or(ArithmeticError::Overflow)?;
@@ -394,8 +401,7 @@ impl<T: Config> Pallet<T> {
 	
 			let lp = sqrt_total.checked_sub(&sqrt_current).ok_or(ArithmeticError::Underflow)?;
 			Ok(lp)
-		} else {
-			// Calculate LP for new pool: sqrt(a * b)
+		} else { // Calculate LP for new pool: sqrt(a * b)
 			let product = new_pair.amount_1.checked_mul(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
 			Ok(IntegerSquareRoot::integer_sqrt(&product))
 		}
@@ -494,7 +500,6 @@ impl<T: Config> Pallet<T> {
 		let new_input_pool = input_pool.checked_add(&exact_in_after_fee).ok_or(ArithmeticError::Overflow)?;
 		// Y = K / X : New Y value after adding to the pool
 		let new_output_pool = k.checked_div(&new_input_pool).unwrap(); 
-
 		// old Y - Y = output
 		let output = output_pool.checked_sub(&new_output_pool).ok_or(ArithmeticError::Underflow)?;
 
@@ -547,14 +552,12 @@ impl<T: Config> Pallet<T> {
 		let new_output_pool = output_pool.checked_sub(&amount_out).ok_or(ArithmeticError::Overflow)?;
 		// Y = K / X : New Y value after adding to the pool
 		let new_input_pool = k.checked_div(&new_output_pool).unwrap(); 
-
 		// Y old - Y : The new pool will be larger this time as we are calculating the input
 		let mut input_required = new_input_pool.checked_sub(&input_pool).ok_or(ArithmeticError::Underflow)?;
 
-		// adding fee to the input
-		let fee = Self::calculate_fees(&input_required)?; // 3 percent fee
-		input_required = input_required.checked_add(&fee).ok_or(ArithmeticError::Overflow)?;
 		
+		let fee = Self::calculate_fees(&input_required)?; 
+		input_required = input_required.checked_add(&fee).ok_or(ArithmeticError::Overflow)?;
 		let new_pool: Pool<T>;
 		if *output_type == pool.pool_pair.asset_1  {
 			new_pool = Pool::<T>::new(
@@ -607,16 +610,14 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
-
 // Look at `../interface/` to better understand this API.
 impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 	type AccountId = T::AccountId;
 	type AssetId = <T::Fungibles as fungibles::Inspect<Self::AccountId>>::AssetId;
 	type AssetBalance = <T::Fungibles as fungibles::Inspect<Self::AccountId>>::Balance;
 
-	/// not sure exactly what shawn wants here
 	fn setup_account(_who: Self::AccountId) -> DispatchResult {
-		unimplemented!()
+		Ok(())
 	}
 
 	fn mint_asset(
