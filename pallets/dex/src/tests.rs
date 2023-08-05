@@ -1,5 +1,7 @@
+use core::f32::consts::E;
+
 use crate::{mock::{*, self}, Error, Event};
-use frame_support::{assert_noop, assert_ok, traits::fungibles::Inspect};
+use frame_support::{assert_noop, assert_ok, traits::fungibles::Inspect, assert_err};
 
 #[test]
 fn simple_add_remove_liquidity() {
@@ -65,3 +67,98 @@ fn simple_swap_withdraw() {
 		assert!(account1_net_worth > 1000);
 	});
 }
+
+
+#[test]
+fn rewards_check() {
+	// account 1 and account 2 put the same amount of funds into the pool but account 1 leaves it in longer and should get more rewards
+
+	new_test_ext().execute_with(|| {
+		System::set_block_number(1);
+		// setting up accounts
+		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
+		assert_ok!(Dex::setup_account(2, vec![(1, 1000), (2, 1000)]));
+		assert_ok!(Dex::setup_account(3, vec![(1, 10_000), (2, 10_000)]));
+
+		// account 1 and 2 add liquidity
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(2), 1, 2, 500, 500));
+
+		// account 3 does a bunch of swaps to increase the rewards
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+
+		//there should be more liquidity in the pool
+		let pool_total = Assets::total_balance(1, &Dex::account_id()) + Assets::total_balance(2, &Dex::account_id());
+		assert!(pool_total > 1000);
+
+		// account 2 removes liquidity
+		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(2), 1, 2, 500));
+
+		// account 3 does a bunch of swaps to increase the rewards
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 1, 2, 150, 0));
+		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
+
+		// account 1 removes liquidity
+		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500));
+
+
+		// account 1 should have more rewards than account 2
+		let account1_rewards = Assets::total_balance(1, &1) + Assets::total_balance(2, &1);
+		let account2_rewards = Assets::total_balance(1, &2) + Assets::total_balance(2, &2);
+		assert!(account1_rewards > account2_rewards);
+	});
+}
+
+
+#[test]
+fn add_pool_same_asset_fail() {
+	new_test_ext().execute_with(|| {
+		// Go past genesis block so events get deposited
+		System::set_block_number(1);
+
+		// setting up account 1 with 1000 of asset type 1 and 2
+		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
+
+		// can't create pool with the same asset
+		assert_err!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 1, 500, 500), Error::<Test>::SameAsset);
+	});
+}
+
+#[test]
+fn parameters_order_no_diff() {
+	new_test_ext().execute_with(|| {
+		// Go past genesis block so events get deposited
+		System::set_block_number(1);
+
+		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
+
+		// should work even though the parameters are in a different order
+		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 2, 1, 500));
+
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 2, 1, 500, 500));
+
+		// should have added liquidity to the same pool
+		let account_1_lp = Assets::total_balance(Dex::get_lp_id(&1, &2).unwrap(), &1);
+		assert_eq!(account_1_lp, 1000);
+
+		// should both represent the same lp token
+		assert_eq!(Dex::get_lp_id(&1, &2).unwrap(), Dex::get_lp_id(&2, &1).unwrap());
+
+	});
+}
+

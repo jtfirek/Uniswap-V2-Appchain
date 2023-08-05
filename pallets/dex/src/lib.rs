@@ -78,7 +78,7 @@ use frame_support::{
 		type PalletId: Get<frame_support::PalletId>;
 	}
 
-	/// Types defined here
+	/// TYPES AND STRUCTS DEFINED HERE
 
 	// gives us access to the asset id and balance types of the fungibles 
 	pub type AssetIdOf<T> = <<T as Config>::Fungibles as fungibles::Inspect<
@@ -87,6 +87,7 @@ use frame_support::{
 	pub type AssetBalanceOf<T> = <<T as Config>::Fungibles as fungibles::Inspect<
 		<T as frame_system::Config>::AccountId,
 	>>::Balance;
+
 	// Stores Pool pairs in sorted order 
 	#[derive(Encode, Decode, MaxEncodedLen, TypeInfo, Clone)]
 	#[scale_info(skip_type_params(T))]
@@ -96,7 +97,6 @@ use frame_support::{
 		pub asset_2: AssetIdOf<T>,
 		pub amount_2: AssetBalanceOf<T>,
 	}
-
 	impl<T: Config> PoolPair<T> {
 		pub fn new(
 			asset_a: AssetIdOf<T>, 
@@ -125,6 +125,7 @@ use frame_support::{
 		}
 	}
 
+	/// STORAGE DEFINED HERE
 	#[derive(Encode, Decode, MaxEncodedLen, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
 	pub struct Pool<T: Config> {
@@ -153,18 +154,19 @@ use frame_support::{
 
 	
 	#[pallet::storage]
-	pub type Fee<T> = StorageValue<_, u32, ValueQuery, FeeDefault>;
-	pub struct FeeDefault(u32);
+	pub type Fee<T> = StorageValue<_, u16, ValueQuery, FeeDefault>;
+	pub struct FeeDefault(u16);
 	impl Default for FeeDefault {
 		fn default() -> Self {
 			Self(3) // The default value is 50.
 		}
 	}
-	impl frame_support::traits::Get<u32> for FeeDefault {
-		fn get() -> u32 {
+	impl frame_support::traits::Get<u16> for FeeDefault {
+		fn get() -> u16 {
 			Self::default().0
 		}
 	}
+
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -188,21 +190,22 @@ use frame_support::{
 		// Event emitted from the price oracle
 		PriceOracleEvent { price: AssetBalanceOf<T>, asset_a: AssetIdOf<T>, asset_b: AssetIdOf<T> },
 	}
-
-	// Errors inform users that something went wrong.
 	#[pallet::error]
 	pub enum Error<T> {
 		/// Error names should be descriptive.
 		NoneValue,
 
-		/// Errors should have helpful documentation associated with them.
-		StorageOverflow,
-
 		// slippage too high
 		SlippageTooHigh,
+
+		// Cannot create pool with the same asset
+		SameAsset,
+
+		// Trying to access a pool that doesn't exist
+		NoPool,
 	}
 
-	/// Dispatch functions defined here
+	/// DISPATCHABLE FUNCTIONS DEFINED HERE
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::call_index(0)]
@@ -261,7 +264,7 @@ use frame_support::{
 			ensure!(T::Fungibles::balance(cur_lp_id.clone(), &who) >= token_amount, "not enough LP tokens"); // not sure if this is an ok way to propagate the error
 
 			// get the pool
-			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
+			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoPool)?;
 
 			// calculate the amount of each asset to return to the user
 			let amount_1 = pool.pool_pair.amount_1.checked_mul(&token_amount).ok_or(ArithmeticError::Overflow)? / pool.lp_supply;
@@ -356,7 +359,7 @@ use frame_support::{
 			) -> DispatchResult {
 			// get the LP pool or propagate error if the pool for that pair doesn't exist
 			let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
-			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
+			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoPool)?;
 
 			let oracle_price;
 			if asset_in == pool.pool_pair.asset_1 {
@@ -409,7 +412,7 @@ impl<T: Config> Pallet<T> {
 		asset_a: &AssetIdOf<T>,
 		asset_b: &AssetIdOf<T>,
 	) -> Result<AssetIdOf<T>, DispatchError> {
-		ensure!(asset_a != asset_b, "cant use the same id twice");
+		ensure!(asset_a != asset_b, Error::<T>::SameAsset );
 		let bytes = if asset_a.encode() > asset_b.encode() {
 			T::Hashing::hash(&(asset_b, asset_a).encode());
 		} else {
@@ -454,8 +457,13 @@ impl<T: Config> Pallet<T> {
 	pub fn calculate_fees(
 		amount_in: &AssetBalanceOf<T>,
 	) -> Result<AssetBalanceOf<T>, DispatchError> {
-		let percent = Percent::from_rational(<Fee<T>>::get(), 100u32);
+		let percent = Percent::from_rational(<Fee<T>>::get(), 100u16);
 		Ok(percent.mul_ceil(*amount_in))
+	}
+
+	// getter for the interface to grab the fee
+	pub fn get_fee() -> u16 {
+		<Fee<T>>::get()
 	}
 
 	// calculates the output of the exchange based on constant product formula
@@ -487,8 +495,8 @@ impl<T: Config> Pallet<T> {
 		// Y = K / X : New Y value after adding to the pool
 		let new_output_pool = k.checked_div(&new_input_pool).unwrap(); 
 
-		// Y - old Y = output
-		let output = new_output_pool.checked_sub(&output_pool).ok_or(ArithmeticError::Underflow)?;
+		// old Y - Y = output
+		let output = output_pool.checked_sub(&new_output_pool).ok_or(ArithmeticError::Underflow)?;
 
 		let new_pool: Pool<T>;
 		if *input_type == pool.pool_pair.asset_1  {
@@ -589,6 +597,14 @@ impl<T: Config> Pallet<T> {
 		}
 		Ok(())
 	}
+
+	// function to get asset balance for interface
+	pub fn asset_balance(
+		who: T::AccountId,
+		asset_id: AssetIdOf<T>,
+	) -> AssetBalanceOf<T> {
+		T::Fungibles::balance(asset_id, &who)
+	}
 }
 
 
@@ -598,6 +614,7 @@ impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 	type AssetId = <T::Fungibles as fungibles::Inspect<Self::AccountId>>::AssetId;
 	type AssetBalance = <T::Fungibles as fungibles::Inspect<Self::AccountId>>::Balance;
 
+	/// not sure exactly what shawn wants here
 	fn setup_account(_who: Self::AccountId) -> DispatchResult {
 		unimplemented!()
 	}
@@ -611,11 +628,16 @@ impl<T: Config> pba_interface::DexInterface for Pallet<T> {
 	}
 
 	fn asset_balance(_who: Self::AccountId, _token_id: Self::AssetId) -> Self::AssetBalance {
-		unimplemented!()
+		Self::asset_balance(_who, _token_id)
 	}
 
 	fn swap_fee() -> u16 {
-		unimplemented!()
+		// convert my percentage to basis points
+		// default is 3 u16 to represent 3%
+		let fee = Self::get_fee();
+
+		// 3% -> 300 basis points
+		fee * 100
 	}
 
 	fn lp_id(_asset_a: Self::AssetId, _asset_b: Self::AssetId) -> Self::AssetId {
