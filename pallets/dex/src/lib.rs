@@ -2,7 +2,8 @@
 
 use frame_support::{
 	pallet_prelude::*, 
-	traits::fungibles,
+	dispatch::Vec,
+	traits::fungibles::{self, Create, Inspect, Mutate},
 	sp_runtime::{
 		ArithmeticError,
 		Percent,
@@ -19,16 +20,6 @@ use frame_support::{
 		}
 	}
 };
-
-use frame_support::traits::fungibles::Mutate;
-use frame_support::traits::fungibles::Create;
-use frame_support::traits::fungibles::Inspect;
-use frame_support::dispatch::Vec;
-
-
-/// Edit this file to define custom logic or remove it if it is not needed.
-/// Learn more about FRAME and the core library of Substrate FRAME pallets:
-/// <https://docs.substrate.io/reference/frame-pallets/>
 pub use pallet::*;
 
 #[cfg(test)]
@@ -48,6 +39,17 @@ use frame_support::{
 		traits::{fungible, fungibles::{self, Create}},
 	};
 	use frame_system::pallet_prelude::*;
+	use crate::ArithmeticError;
+	use frame_support::{
+		sp_runtime::traits::{
+			CheckedDiv,
+			CheckedMul,
+		},
+		traits::{
+			fungibles::{Inspect, Mutate},
+			tokens::{Preservation::*, Precision::BestEffort, Fortitude::Force},
+		},
+	};
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
@@ -85,13 +87,6 @@ use frame_support::{
 	pub type AssetBalanceOf<T> = <<T as Config>::Fungibles as fungibles::Inspect<
 		<T as frame_system::Config>::AccountId,
 	>>::Balance;
-
-	// //gives us access to the asset id and balance types of the native currency
-	// pub type NativeAssetBalanceOf<T> = <<T as Config>::NativeBalance as fungible::Inspect<
-	// 	<T as frame_system::Config>::AccountId,
-	// >>::Balance;
-
-	
 	// Stores Pool pairs in sorted order 
 	#[derive(Encode, Decode, MaxEncodedLen, TypeInfo, Clone)]
 	#[scale_info(skip_type_params(T))]
@@ -101,6 +96,7 @@ use frame_support::{
 		pub asset_2: AssetIdOf<T>,
 		pub amount_2: AssetBalanceOf<T>,
 	}
+
 	impl<T: Config> PoolPair<T> {
 		pub fn new(
 			asset_a: AssetIdOf<T>, 
@@ -126,18 +122,6 @@ use frame_support::{
 					amount_2: amount_b,
 				})
 			}
-		}
-
-		pub fn default(
-			asset_a: AssetIdOf<T>,
-			asset_b: AssetIdOf<T>,
-		) -> Result<Self, &'static str> {
-			Self::new(
-				asset_a, 
-				AssetBalanceOf::<T>::default(), 
-				asset_b, 
-				AssetBalanceOf::<T>::default()
-			)
 		}
 	}
 
@@ -165,11 +149,23 @@ use frame_support::{
 	#[pallet::storage]
 	#[pallet::getter(fn something)]
 	// The pools are stored by a key that is the asset id of the LP token
-	pub type PoolMap<T> =
-		StorageMap<_, Blake2_128Concat, AssetIdOf<T>, Pool<T>>;
+	pub type PoolMap<T> = StorageMap<_, Blake2_128Concat, AssetIdOf<T>, Pool<T>>;
 
-	// Pallets use events to inform users when important changes are made.
-	// https://docs.substrate.io/main-docs/build/events-errors/
+	
+	#[pallet::storage]
+	pub type Fee<T> = StorageValue<_, u32, ValueQuery, FeeDefault>;
+	pub struct FeeDefault(u32);
+	impl Default for FeeDefault {
+		fn default() -> Self {
+			Self(3) // The default value is 50.
+		}
+	}
+	impl frame_support::traits::Get<u32> for FeeDefault {
+		fn get() -> u32 {
+			Self::default().0
+		}
+	}
+
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -205,27 +201,10 @@ use frame_support::{
 		// slippage too high
 		SlippageTooHigh,
 	}
-	use frame_support::sp_runtime::traits::{
-		CheckedMul,
-		CheckedDiv
-	};
-	use crate::ArithmeticError;
-	use frame_support::traits::fungibles::{
-		Mutate,
-		Inspect,
-	};
-	use frame_support::traits::tokens::Preservation::*;
-	use frame_support::traits::tokens::Precision::BestEffort;
-	use frame_support::traits::tokens::Fortitude::Force;
 
-
-	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
-	// These functions materialize as "extrinsics", which are often compared to transactions.
-	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
+	/// Dispatch functions defined here
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		
-
 		#[pallet::call_index(0)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn add_liquidity(
@@ -238,29 +217,22 @@ use frame_support::{
 			let who = ensure_signed(origin)?;
 			let cur_lp_id = Self::get_lp_id(&asset_a, &asset_b)?;
 			let add_amounts = PoolPair::<T>::new(asset_a.clone(), amount_a, asset_b.clone(), amount_b)?;
-			let mut lp_amount = AssetBalanceOf::<T>::default();
+			let lp_amount;
 			match <PoolMap<T>>::get(&cur_lp_id) {
-				// New Pool
-				None => {
-					// Calculate the amount of LP tokens to mint
+				None => { // New Pool
+					// create and mint the new tokens
 					lp_amount = Self::calculate_lp(&add_amounts, None)?;
-
-					// Create the LP token and mint to user
 					T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , true, lp_amount)?;
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
 					
-					// Create the pool and store it
+					// Create the pool and store them
 					let new_pool = Pool::<T>::new(add_amounts, lp_amount);
 					<PoolMap<T>>::insert(&cur_lp_id, new_pool);
 				},
 				Some(existing_pool) => {
-					// Calculate the amount of LP tokens to mint
+					// get amount of addition LP tokens to mint and add to the pool
 					lp_amount = Self::calculate_lp(&add_amounts, Some(&existing_pool))?;
-
-					// mint to user
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
-
-					// add to the pool
 					Self::increase_pool(&add_amounts, &lp_amount, &cur_lp_id)?;
 				},
 			}
@@ -378,7 +350,7 @@ use frame_support::{
 		#[pallet::call_index(4)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn price_oracle(
-			origin: OriginFor<T>,
+			_origin: OriginFor<T>,
 			asset_in: AssetIdOf<T>,
 			asset_out: AssetIdOf<T>,
 			) -> DispatchResult {
@@ -399,60 +371,53 @@ use frame_support::{
 }
 
 impl<T: Config> Pallet<T> {
-	// helper function to calculate the amount of LP tokens to mint and issue them 
-	// lp = sqrt((A+a)*(B+b)) - sqrt(A*B) 
-	// Where A and B are the current amount of tokenA and tokenB in the pool. a and b are the amounts of tokenA and tokenB that the user is adding to the pool
-	// if new pool, the equation simplifies lp = sqrt(a*b)
+	/// Calculates the amount of LP tokens. 
+	///
+	/// For existing pools, the formula is `lp = sqrt((A+a)*(B+b)) - sqrt(A*B)`. `A` and `B` are the current pool amounts and `a` and `b` are the amounts to add. 
+	/// For new pools, `lp = sqrt(a*b)`.
 	fn calculate_lp(
 		new_pair: &PoolPair<T>,
 		pool: Option<&Pool<T>>,
 	) -> Result<AssetBalanceOf<T>, DispatchError> {
-		match pool {
-			None => {
-				// new pool sqrt(a*b)
-				return Ok(IntegerSquareRoot::integer_sqrt(&new_pair.amount_1.checked_mul(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?));
-			},
-			Some(pool) => {
-				// (A + a)
-				let total_1 = pool.pool_pair.amount_1.checked_add(&new_pair.amount_1).ok_or(ArithmeticError::Overflow)?;
-				// (B + b)
-				let total_2 = pool.pool_pair.amount_2.checked_add(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
-				// (A + a) * (B + b)
-				let total_1_2 = total_1.checked_mul(&total_2).ok_or(ArithmeticError::Overflow)?;
-				// sqrt((A + a) * (B + b))
-				let sqrt_1 = IntegerSquareRoot::integer_sqrt(&total_1_2);
-				// sqrt(A * B)
-				let sqrt_2 = IntegerSquareRoot::integer_sqrt(&pool.pool_pair.amount_1.checked_mul(&pool.pool_pair.amount_2).ok_or(ArithmeticError::Overflow)?);
-				// sqrt((A + a) * (B + b)) - sqrt(A * B)
-				let lp = sqrt_1.checked_sub(&sqrt_2).ok_or(ArithmeticError::Underflow)?;
-				return Ok(lp);
-			}
+		if let Some(pool) = pool {
+			// Calculate LP for existing pool: sqrt((A + a) * (B + b)) - sqrt(A * B)
+			let total_1 = pool.pool_pair.amount_1.checked_add(&new_pair.amount_1).ok_or(ArithmeticError::Overflow)?;
+			let total_2 = pool.pool_pair.amount_2.checked_add(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
+			let total_product = total_1.checked_mul(&total_2).ok_or(ArithmeticError::Overflow)?;
+			let sqrt_total = IntegerSquareRoot::integer_sqrt(&total_product);
+	
+			let current_product = pool.pool_pair.amount_1.checked_mul(&pool.pool_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
+			let sqrt_current = IntegerSquareRoot::integer_sqrt(&current_product);
+	
+			let lp = sqrt_total.checked_sub(&sqrt_current).ok_or(ArithmeticError::Underflow)?;
+			Ok(lp)
+		} else {
+			// Calculate LP for new pool: sqrt(a * b)
+			let product = new_pair.amount_1.checked_mul(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
+			Ok(IntegerSquareRoot::integer_sqrt(&product))
 		}
 	}
 
-	/// The account ID of the dex pallet. It can be used as an admin for new assets created.
-	///
-	/// This actually does computation. If you need to keep using it, then make sure you cache the
-	/// value and only call this once.
+	/// The account ID of the dex pallet. This account stores all of the assets in the dex.
 	pub fn account_id() -> T::AccountId {
 		T::PalletId::get().into_account_truncating()
 	}
 
-	// This function assumes asset_a and asset_b have already been sorted
-	pub fn get_lp_id(
+	/// Generates a liquidity pool ID from the given asset IDs, ensuring the assets are distinct.
+	/// The pool ID is based on a hash of the sorted asset IDs.
+	pub fn get_lp_id( 
 		asset_a: &AssetIdOf<T>,
 		asset_b: &AssetIdOf<T>,
 	) -> Result<AssetIdOf<T>, DispatchError> {
-		let bytes;
 		ensure!(asset_a != asset_b, "cant use the same id twice");
-		if asset_a.encode() > asset_b.encode() {
-			bytes = T::Hashing::hash(&(asset_b, asset_a).encode());
+		let bytes = if asset_a.encode() > asset_b.encode() {
+			T::Hashing::hash(&(asset_b, asset_a).encode());
 		} else {
-			bytes = T::Hashing::hash(&(asset_a, asset_b).encode());
-		}
-		let generated_account = AssetIdOf::<T>::decode(&mut TrailingZeroInput::new(&bytes.encode()))
+			T::Hashing::hash(&(asset_a, asset_b).encode());
+		};
+		let generated_lp_id = AssetIdOf::<T>::decode(&mut TrailingZeroInput::new(&bytes.encode()))
 			.expect("in our PBA exam, we assume all bytes can be ID");
-		Ok(generated_account)
+		Ok(generated_lp_id)
 	}
 
 	// adds liquidity to an existing pool
@@ -489,8 +454,8 @@ impl<T: Config> Pallet<T> {
 	pub fn calculate_fees(
 		amount_in: &AssetBalanceOf<T>,
 	) -> Result<AssetBalanceOf<T>, DispatchError> {
-		let three_percent = Percent::from_rational(3u32, 100u32);
-		Ok(three_percent.mul_ceil(*amount_in))
+		let percent = Percent::from_rational(<Fee<T>>::get(), 100u32);
+		Ok(percent.mul_ceil(*amount_in))
 	}
 
 	// calculates the output of the exchange based on constant product formula
@@ -576,7 +541,7 @@ impl<T: Config> Pallet<T> {
 		let new_input_pool = k.checked_div(&new_output_pool).unwrap(); 
 
 		// Y old - Y : The new pool will be larger this time as we are calculating the input
-		let mut input_required = input_pool.checked_sub(&new_input_pool).ok_or(ArithmeticError::Underflow)?;
+		let mut input_required = new_input_pool.checked_sub(&input_pool).ok_or(ArithmeticError::Underflow)?;
 
 		// adding fee to the input
 		let fee = Self::calculate_fees(&input_required)?; // 3 percent fee
@@ -587,9 +552,9 @@ impl<T: Config> Pallet<T> {
 			new_pool = Pool::<T>::new(
 				PoolPair::<T>::new(
 					pool.pool_pair.asset_1.clone(),
-					new_input_pool + fee,
-					pool.pool_pair.asset_2.clone(),
 					new_output_pool,
+					pool.pool_pair.asset_2.clone(),
+					new_input_pool + fee,
 				)?,
 				pool.lp_supply,
 			);
@@ -597,9 +562,9 @@ impl<T: Config> Pallet<T> {
 			new_pool = Pool::<T>::new(
 				PoolPair::<T>::new(
 					pool.pool_pair.asset_1.clone(),
-					new_output_pool,
-					pool.pool_pair.asset_2.clone(),
 					new_input_pool + fee,
+					pool.pool_pair.asset_2.clone(),
+					new_output_pool,
 				)?,
 				pool.lp_supply,
 			);
@@ -622,11 +587,8 @@ impl<T: Config> Pallet<T> {
 
 			T::Fungibles::mint_into(asset_id.clone(), &who, asset_balance)?;
 		}
-
 		Ok(())
 	}
-
-
 }
 
 
