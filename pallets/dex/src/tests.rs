@@ -162,13 +162,14 @@ fn parameters_order_no_diff() {
 	});
 }
 
-// #[test]
-// fn changing_fee() {
-// 	new_test_ext().execute_with(|| {
-// 		// Go past genesis block so events get deposited
-// 		System::set_block_number(1);
+#[test]
+fn changing_fee() {
+	new_test_ext().execute_with(|| {
+		// Go past genesis block so events get deposited
+		System::set_block_number(1);
 
+		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
+		
 
-// 	});
-// 	})
-// }
+	});
+}

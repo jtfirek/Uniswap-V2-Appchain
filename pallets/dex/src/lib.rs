@@ -74,7 +74,7 @@ use frame_support::{
 			+ fungibles::Mutate<Self::AccountId>
 			+ fungibles::Create<Self::AccountId>;
 
-		type PermissionedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+		type PermissionOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
 		/// The DEXs pallet id, used for deriving its sovereign account ID.
 		#[pallet::constant]
@@ -170,7 +170,6 @@ use frame_support::{
 		}
 	}
 
-
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -213,6 +212,9 @@ use frame_support::{
 
 		// insufficient lp balance
 		InsufficientLPBalance,
+
+		// Not allowed to set fee
+		NotAllowedToSetFee,
 	}
 
 	/// DISPATCHABLE FUNCTIONS DEFINED HERE
@@ -367,14 +369,14 @@ use frame_support::{
 			Ok(())
 		}
 
-		/// This function allows the owner to change the fee percentage.
+		/// This function allows the permission origin to set the fee
 		#[pallet::call_index(5)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn set_fee(
 			origin: OriginFor<T>,
 			new_fee: u16,
 			) -> DispatchResult {
-			T::PermissionedOrigin::ensure_origin(origin)?;
+			ensure!(T::PermissionOrigin::try_origin(origin).is_ok(), Error::<T>::NotAllowedToSetFee);
 			<Fee<T>>::put(new_fee);
 			Ok(())
 		}
