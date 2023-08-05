@@ -169,7 +169,6 @@ fn changing_fee() {
 		System::set_block_number(1);
 
 		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
-		
 
 	});
 }

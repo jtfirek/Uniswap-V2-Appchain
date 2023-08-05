@@ -26,6 +26,7 @@ Divides the amount of tokens in the output pool by the amount of tokens in the i
 
 ### LP token math
 This is the math that is used to ensure a fair distribution of liquidity provider (LP) tokens based on the amount of liquidity provided. 
+
 #### Creating a pool
 When a user creates a creates a new pool. The amount of LP tokens they receive is calculated by the following formula:
 ```
@@ -47,10 +48,11 @@ amountA = (amountLP / totalLP) * totalA
 amountB = (amountLP / totalLP) * totalB
 ```
 
-## API
+## Extrinsic functions
 
-The pallet exposes the following API. All methods are called on an instance of the DexInterface:
-
+Here are the extrinsics functions that are available to be called by users to interact with a runtime that implements the DEX pallet.
+ To call an extrinsic, you need to create a transaction from an account with sufficient balance and broadcast it to the network. This action will trigger the associated extrinsic function.
+You may construct these transactions directly through JavaScript or the Polkadot.js API
 
 #### [`price_oracle`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/335e76986a7fffdde5eac6a2cfc4dd37415126db/pallets/interface/src/lib.rs#L54)
 **Description:** Emits an event that with a percentage representing the current exchange rate between asset_in and asset_out.
