@@ -50,76 +50,89 @@ amountB = (amountLP / totalLP) * totalB
 
 ## Extrinsic functions
 
-Here are the extrinsics functions that are available to be called by users to interact with a runtime that implements the DEX pallet.
- To call an extrinsic, you need to create a transaction from an account with sufficient balance and broadcast it to the network. This action will trigger the associated extrinsic function.
-You may construct these transactions directly through JavaScript or the Polkadot.js API
+Here are the extrinsics functions that are available to be called by users to interact with a runtime that implements the DEX pallet. To call an extrinsic, you need to create a transaction from an account with sufficient balance and broadcast it to the network. This action will trigger the associated extrinsic function.
+You may construct these transactions directly through JavaScript or with the Polkadot.js API
 
-#### [`price_oracle`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/335e76986a7fffdde5eac6a2cfc4dd37415126db/pallets/interface/src/lib.rs#L54)
-**Description:** Emits an event that with a percentage representing the current exchange rate between asset_in and asset_out.
-
-#### Signature:
-```rust
-fn price_oracle(
-asset_in: Self::AssetId,
-asset_out: Self::AssetId,
-) -> DispatchResult;
-```
-<br>
-
-#### [`add_liquidity`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/335e76986a7fffdde5eac6a2cfc4dd37415126db/pallets/interface/src/lib.rs#L54)
+#### [`add_liquidity`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L229)
 **Description:** Adds liquidity to a pool on behalf of the user. If necessary, this will create the pool. LP tokens are minted to the caller.
-
+**Call index**: 0
 #### Signature:
 ```rust
 fn add_liquidity(
-who: Self::AccountId,
-asset_a: Self::AssetId,
-asset_b: Self::AssetId,
-amount_a: Self::AssetBalance,
-amount_b: Self::AssetBalance,
-) -> DispatchResult;
+origin: OriginFor<T>,
+asset_a: AssetIdOf<T>,
+asset_b: AssetIdOf<T>,
+amount_a: AssetBalanceOf<T>,
+amount_b: AssetBalanceOf<T>,
+) -> DispatchResult
 ```
 <br>
 
-#### [`remove_liquidity`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/335e76986a7fffdde5eac6a2cfc4dd37415126db/pallets/interface/src/lib.rs#L66)
+#### [`remove_liquidity`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L267)
 **Description:** Removes liquidity from a pool on behalf of the user. The token_amount represents the amount of LP tokens to be burned in exchange for underlying assets.
-
+**Call index**: 1
 #### Signature:
 ```rust
 fn remove_liquidity(
-who: Self::AccountId,
-asset_a: Self::AssetId,
-asset_b: Self::AssetId,
-token_amount: Self::AssetBalance,
-) -> DispatchResult;
+origin: OriginFor<T>,
+asset_a: AssetIdOf<T>,
+asset_b: AssetIdOf<T>,
+token_amount: AssetBalanceOf<T>,
+) -> DispatchResult
 ```
 <br>
 
-#### [`Swap_exact_in_for_out`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/335e76986a7fffdde5eac6a2cfc4dd37415126db/pallets/interface/src/lib.rs#L77)
+#### [`Swap_exact_in_for_out`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L296)
 **Description:** Swaps an exact amount of asset_in for a minimum amount of asset_out on behalf of who. The swap fee is deducted from the out amount.
-
+**Call index**: 2
 #### Signature:
 ```rust
 fn swap_exact_in_for_out(
-who: Self::AccountId,
-asset_in: Self::AssetId,
-asset_out: Self::AssetId,
-exact_in: Self::AssetBalance,
-min_out: Self::AssetBalance,
-) -> DispatchResult;
+origin: OriginFor<T>,
+asset_in: AssetIdOf<T>,
+asset_out: AssetIdOf<T>,
+exact_in: AssetBalanceOf<T>,
+min_out: AssetBalanceOf<T>,
+) -> DispatchResult
 ```
 <br>
 
-#### [`Swap_in_for_exact_out`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/335e76986a7fffdde5eac6a2cfc4dd37415126db/pallets/interface/src/lib.rs#L89)
+#### [`Swap_in_for_exact_out`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L325)
 **Description:** Swaps a max amount of asset_in for an exact amount of asset_out on behalf of who. The swap fee is added to the in amount.
-
+**Call index**: 3
 #### Signature:
 ```rust
-fn swap_in_for_exact_out(
-origin: Self::AccountId,
-asset_in: Self::AssetId,
-asset_out: Self::AssetId,
-max_in: Self::AssetBalance,
-exact_out: Self::AssetBalance,
-) -> DispatchResult;
+swap_in_for_exact_out(
+origin: OriginFor<T>,
+asset_in: AssetIdOf<T>,
+asset_out: AssetIdOf<T>,
+max_in: AssetBalanceOf<T>,
+exact_out: AssetBalanceOf<T>,
+) -> DispatchResult 
 ```
+<br>
+
+#### [`price_oracle`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L354)
+**Description:** Emits an event with a percentage representing the current exchange rate between asset_in and asset_out.
+**Call index**: 4
+#### Signature:
+```rust
+fn price_oracle(
+_origin: OriginFor<T>,
+asset_in: AssetIdOf<T>,
+asset_out: AssetIdOf<T>,
+) -> DispatchResult
+```
+<br>
+
+#### [`set_fee`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L375)
+**Description:** Sets the fee for the DEX pallet. Each input represents 100 basis points. An input of 4 would yield a fee of 400 basis points or 4 percent. The fee can **Only** be set by the origin that is configured in the runtime.
+**Call index**: 5
+#### Signature:
+```rust
+fn set_fee(
+origin: OriginFor<T>,
+new_fee: u16,
+) -> DispatchResult
+```
+<br>
