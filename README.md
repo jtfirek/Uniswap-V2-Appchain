@@ -1,9 +1,10 @@
 # Uniswap V2 Style DEX Pallet
 
 
-This DEX (Decentralized Exchange) Pallet is based on the Uniswap V2 design and allows users to trustlessly exchange tokens.
-The DEX includes functionality to incentivize users to create liquidity pools and also provides a price oracle based on the existing liquidity pools.
-The swap fee has a default value of 3 percent, but the pallet provides an the extrinsic `set_fee` to allow the fee to be changed. 
+This DEX (Decentralized Exchange) Pallet is based on the Uniswap V2 design and allows users to trustlessly exchange tokens. The DEX also allows for 
+to attempt flash loans with the liquidity in the pools.The DEX includes functionality to incentivize users to create liquidity 
+pools and also provides a price oracle based on the existing liquidity pools.
+The swap and loan fee has a default value of 3 percent, but the pallet provides an the extrinsic `set_fee` to allow the fee to be changed. 
 When configuring the runtime, the origin that has permission to set the fee must be set.
 
 ## How it works 
@@ -133,6 +134,20 @@ asset_out: AssetIdOf<T>,
 fn set_fee(
 origin: OriginFor<T>,
 new_fee: u16,
+) -> DispatchResult
+```
+<br>
+
+#### [`set_fee`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L375)
+**Description:** Allows a user to attempt a flash loan. The user can dispatch any any system call to return the loan with the fee. The user must return the amount of tokens that they borrowed plus a fee of 0.3 percent.
+**Call index**: 6
+#### Signature:
+```rust
+fn flash_loan(
+origin: OriginFor<T>,
+asset_id: AssetIdOf<T>,
+amount: AssetBalanceOf<T>,
+call: Box<<T as frame_system::Config>::RuntimeCall>
 ) -> DispatchResult
 ```
 <br>

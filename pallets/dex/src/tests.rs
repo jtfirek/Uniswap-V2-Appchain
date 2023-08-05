@@ -1,4 +1,3 @@
-use core::f32::consts::E;
 
 use crate::{mock::{*, self}, Error, Event};
 use frame_support::{assert_noop, assert_ok, traits::fungibles::Inspect, assert_err};

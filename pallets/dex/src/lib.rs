@@ -33,7 +33,7 @@ mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet {
-
+use scale_info::prelude::boxed::Box;
 use frame_support::{
 		pallet_prelude::*,
 		traits::{fungible, fungibles::{self, Create}},
@@ -41,8 +41,8 @@ use frame_support::{
 	use frame_system::pallet_prelude::*;
 	use crate::ArithmeticError;
 	use frame_support::{
+		dispatch::{Dispatchable},
 		sp_runtime::traits::{
-			CheckedDiv,
 			CheckedMul,
 		},
 		sp_runtime::Percent,
@@ -51,10 +51,10 @@ use frame_support::{
 			tokens::{Preservation::*, Precision::BestEffort, Fortitude::Force},
 		},
 	};
-
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
+	
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
@@ -79,9 +79,10 @@ use frame_support::{
 		/// The DEXs pallet id, used for deriving its sovereign account ID.
 		#[pallet::constant]
 		type PalletId: Get<frame_support::PalletId>;
-	}
 
-	/// TYPES AND STRUCTS DEFINED HERE
+		// type RuntimeCall: Parameter + Dispatchable<RuntimeOrigin = Self::RuntimeOrigin> + GetDispatchInfo;
+
+	}
 
 	// gives us access to the asset id and balance types of the fungibles 
 	pub type AssetIdOf<T> = <<T as Config>::Fungibles as fungibles::Inspect<
@@ -193,7 +194,13 @@ use frame_support::{
 		PriceOracleEvent { rate: Percent, asset_in: AssetIdOf<T>, asset_out: AssetIdOf<T> },
 
 		// Swap event
-		SwapEvent { asset_in: AssetIdOf<T>, asset_out: AssetIdOf<T>, amount_in: AssetBalanceOf<T>, amount_out: AssetBalanceOf<T>, }
+		SwapEvent { asset_in: AssetIdOf<T>, asset_out: AssetIdOf<T>, amount_in: AssetBalanceOf<T>, amount_out: AssetBalanceOf<T>, },
+
+		// Fee update
+		FeeUpdated { new_fee: u16 },
+
+		// Flash loan event
+		FlashLoanEvent { asset_id: AssetIdOf<T>, amount: AssetBalanceOf<T> },
 	}
 
 	#[pallet::error]
@@ -215,6 +222,15 @@ use frame_support::{
 
 		// Not allowed to set fee
 		NotAllowedToSetFee,
+
+		// Insufficient liquidity for flash loan
+		InsufficientLiquidity,
+
+		// Insufficient repayment for flash loan
+		InsufficientRepayment,
+
+		// Call failed
+		CallFailed,
 	}
 
 	/// DISPATCHABLE FUNCTIONS DEFINED HERE
@@ -378,6 +394,34 @@ use frame_support::{
 			) -> DispatchResult {
 			ensure!(T::PermissionOrigin::try_origin(origin).is_ok(), Error::<T>::NotAllowedToSetFee);
 			<Fee<T>>::put(new_fee);
+			Self::deposit_event(Event::FeeUpdated { new_fee });
+			Ok(())
+		}
+
+		/// This function allows a user to borrow a specified amount of an asset
+		/// temporarily for execution of a predefined function (`call`), provided 
+		/// that the asset has sufficient liquidity. The borrowed assets are 
+		/// automatically transferred to the user. 
+		#[pallet::call_index(6)]
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
+		pub fn flash_loan(
+			origin: OriginFor<T>,
+			asset_id: AssetIdOf<T>,
+			amount: AssetBalanceOf<T>,
+			call: Box<<T as frame_system::Config>::RuntimeCall>
+			) -> DispatchResult {
+			// ensuring sufficient liquidity and permission
+			let who = ensure_signed(origin.clone())?;
+			let total_liquidity = T::Fungibles::total_issuance(asset_id.clone());
+			ensure!(total_liquidity >= amount, Error::<T>::InsufficientLiquidity);
+			T::Fungibles::transfer(asset_id.clone(), &Self::account_id(), &who, amount, Expendable)?;
+
+			// execute the borrowers contract
+			call.dispatch(origin).map_err(|_| Error::<T>::CallFailed)?;
+			let fee = Self::calculate_fees(&amount)?;
+			ensure!(T::Fungibles::balance(asset_id.clone(), &Self::account_id()) >=  total_liquidity + fee, Error::<T>::InsufficientRepayment);
+			
+			Self::deposit_event(Event::FlashLoanEvent { asset_id, amount });
 			Ok(())
 		}
 	}
@@ -501,7 +545,7 @@ impl<T: Config> Pallet<T> {
 		// New X value after adding to the pool
 		let new_input_pool = input_pool.checked_add(&exact_in_after_fee).ok_or(ArithmeticError::Overflow)?;
 		// Y = K / X : New Y value after adding to the pool
-		let new_output_pool = k.checked_div(&new_input_pool).unwrap(); 
+		let new_output_pool = k.checked_div(&new_input_pool).ok_or(ArithmeticError::Underflow)?;
 		// old Y - Y = output
 		let output = output_pool.checked_sub(&new_output_pool).ok_or(ArithmeticError::Underflow)?;
 
@@ -553,7 +597,7 @@ impl<T: Config> Pallet<T> {
 		// New X value after removing from the pool
 		let new_output_pool = output_pool.checked_sub(&amount_out).ok_or(ArithmeticError::Overflow)?;
 		// Y = K / X : New Y value after adding to the pool
-		let new_input_pool = k.checked_div(&new_output_pool).unwrap(); 
+		let new_input_pool = k.checked_div(&new_output_pool).ok_or(ArithmeticError::Underflow)?;
 		// Y old - Y : The new pool will be larger this time as we are calculating the input
 		let mut input_required = new_input_pool.checked_sub(&input_pool).ok_or(ArithmeticError::Underflow)?;
 
@@ -603,7 +647,7 @@ impl<T: Config> Pallet<T> {
 		Ok(())
 	}
 
-	// function to get asset balance for interface
+	// function to get asset balance 
 	pub fn asset_balance(
 		who: T::AccountId,
 		asset_id: AssetIdOf<T>,

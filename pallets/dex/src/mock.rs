@@ -98,6 +98,7 @@ impl pallet_dex::Config for Test {
 	type NativeBalance = Balances;
 	type Fungibles = Assets;
 	type PalletId = DexPalletId;
+	type PermissionOrigin = EnsureRoot<Self::AccountId>;
 }
 
 // Build genesis storage according to the mock runtime.
