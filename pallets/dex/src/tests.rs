@@ -1,6 +1,8 @@
-
-use crate::{mock::{*, self}, Error, Event};
-use frame_support::{assert_noop, assert_ok, traits::fungibles::Inspect, assert_err};
+use crate::{
+	mock::{self, *},
+	Error, Event,
+};
+use frame_support::{assert_err, assert_noop, assert_ok, traits::fungibles::Inspect};
 use sp_runtime::Percent;
 
 #[test]
@@ -18,7 +20,13 @@ fn simple_add_remove_liquidity() {
 		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
 
 		// Lp issued sqr(500*500) = 500
-		System::assert_last_event(mock::RuntimeEvent::Dex(Event::LiquidityAdded{ asset_a: 1, asset_b: 2, amount_a: 500, amount_b: 500, amount_lp: 500 }));
+		System::assert_last_event(mock::RuntimeEvent::Dex(Event::LiquidityAdded {
+			asset_a: 1,
+			asset_b: 2,
+			amount_a: 500,
+			amount_b: 500,
+			amount_lp: 500,
+		}));
 		assert_eq!(Assets::total_balance(1, &1), 500);
 		assert_eq!(Assets::total_balance(2, &1), 500);
 		assert_eq!(Assets::total_balance(Dex::get_lp_id(&1, &2).unwrap(), &1), 500);
@@ -26,7 +34,6 @@ fn simple_add_remove_liquidity() {
 		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500));
 	});
 }
-
 
 #[test]
 fn simple_swap_withdraw() {
@@ -46,7 +53,6 @@ fn simple_swap_withdraw() {
 		// create a new account to swap
 		assert_ok!(Dex::setup_account(2, vec![(1, 1000)]));
 
-
 		// swap for 100 of asset 2
 		// should be 103 input
 		assert_ok!(Dex::swap_in_for_exact_out(RuntimeOrigin::signed(2), 1, 2, 150, 100));
@@ -58,9 +64,13 @@ fn simple_swap_withdraw() {
 		assert_eq!(Assets::total_balance(2, &&Dex::account_id()), 400);
 
 		// should fail because the max input they are providing is too low
-		assert_noop!(Dex::swap_in_for_exact_out(RuntimeOrigin::signed(2), 1, 2, 20, 100), Error::<Test>::SlippageTooHigh);
+		assert_noop!(
+			Dex::swap_in_for_exact_out(RuntimeOrigin::signed(2), 1, 2, 20, 100),
+			Error::<Test>::SlippageTooHigh
+		);
 
-		// withdraw liquidity from account 1 should get more total tokens due to the fee paid by account 2
+		// withdraw liquidity from account 1 should get more total tokens due to the fee paid by
+		// account 2
 		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500));
 
 		let account1_net_worth = Assets::total_balance(1, &1) + Assets::total_balance(2, &1);
@@ -68,10 +78,10 @@ fn simple_swap_withdraw() {
 	});
 }
 
-
 #[test]
 fn rewards_check() {
-	// account 1 and account 2 put the same amount of funds into the pool but account 1 leaves it in longer and should get more rewards
+	// account 1 and account 2 put the same amount of funds into the pool but account 1 leaves it in
+	// longer and should get more rewards
 
 	new_test_ext().execute_with(|| {
 		System::set_block_number(1);
@@ -95,7 +105,8 @@ fn rewards_check() {
 		assert_ok!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(3), 2, 1, 150, 0));
 
 		//there should be more liquidity in the pool
-		let pool_total = Assets::total_balance(1, &Dex::account_id()) + Assets::total_balance(2, &Dex::account_id());
+		let pool_total = Assets::total_balance(1, &Dex::account_id()) +
+			Assets::total_balance(2, &Dex::account_id());
 		assert!(pool_total > 1000);
 
 		// account 2 removes liquidity
@@ -114,14 +125,12 @@ fn rewards_check() {
 		// account 1 removes liquidity
 		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500));
 
-
 		// account 1 should have more rewards than account 2
 		let account1_rewards = Assets::total_balance(1, &1) + Assets::total_balance(2, &1);
 		let account2_rewards = Assets::total_balance(1, &2) + Assets::total_balance(2, &2);
 		assert!(account1_rewards > account2_rewards);
 	});
 }
-
 
 #[test]
 fn add_pool_same_asset_fail() {
@@ -133,7 +142,10 @@ fn add_pool_same_asset_fail() {
 		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
 
 		// can't create pool with the same asset
-		assert_err!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 1, 500, 500), Error::<Test>::SameAsset);
+		assert_err!(
+			Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 1, 500, 500),
+			Error::<Test>::SameAsset
+		);
 	});
 }
 
@@ -158,7 +170,6 @@ fn parameters_order_no_diff() {
 
 		// should both represent the same lp token
 		assert_eq!(Dex::get_lp_id(&1, &2).unwrap(), Dex::get_lp_id(&2, &1).unwrap());
-
 	});
 }
 
@@ -169,7 +180,6 @@ fn changing_fee() {
 		System::set_block_number(1);
 
 		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
-
 	});
 }
 
@@ -184,12 +194,17 @@ fn empty_pool_fail() {
 		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
 		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500));
 
-
 		// can't remove liquidity from an empty pool
-		assert_err!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500), Error::<Test>::InsufficientLPBalance);
+		assert_err!(
+			Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500),
+			Error::<Test>::InsufficientLPBalance
+		);
 
 		// can't swap from an empty pool
-		assert_err!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(1), 1, 2, 500, 0), Error::<Test>::NoneValue);
+		assert_err!(
+			Dex::swap_exact_in_for_out(RuntimeOrigin::signed(1), 1, 2, 500, 0),
+			Error::<Test>::NoneValue
+		);
 	});
 }
 
@@ -202,14 +217,26 @@ fn test_ratio() {
 		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
 
 		// should be 1:1 ratio
-		let rate11 = Percent::from_rational(1u16,1u16);
+		let rate11 = Percent::from_rational(1u16, 1u16);
 		assert_ok!(Dex::price_oracle(RuntimeOrigin::signed(1), 1, 2));
-		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent{asset_in: 1, asset_out: 2, rate: rate11}));
+		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent {
+			asset_in: 1,
+			asset_out: 2,
+			rate: rate11,
+		}));
 
 		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 0));
 		assert_ok!(Dex::price_oracle(RuntimeOrigin::signed(1), 1, 2));
-		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent{asset_in: 1, asset_out: 2, rate: Percent::from_rational(1u16,2u16)}));
+		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent {
+			asset_in: 1,
+			asset_out: 2,
+			rate: Percent::from_rational(1u16, 2u16),
+		}));
 		assert_ok!(Dex::price_oracle(RuntimeOrigin::signed(1), 2, 1));
-		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent{asset_in: 2, asset_out: 1, rate: Percent::from_rational(2u16,1u16)}));
+		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent {
+			asset_in: 2,
+			asset_out: 1,
+			rate: Percent::from_rational(2u16, 1u16),
+		}));
 	});
 }

@@ -1,7 +1,8 @@
 use crate as pallet_dex;
 use frame_support::{
 	parameter_types,
-	traits::{AsEnsureOriginWithArg, ConstU128, ConstU16, ConstU32, ConstU64}, PalletId,
+	traits::{AsEnsureOriginWithArg, ConstU128, ConstU16, ConstU32, ConstU64},
+	PalletId,
 };
 use frame_system::{EnsureRoot, EnsureSigned};
 use sp_core::H256;
