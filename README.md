@@ -2,10 +2,10 @@
 
 
 This DEX (Decentralized Exchange) Pallet is based on the Uniswap V2 design and allows users to trustlessly exchange tokens. The DEX also allows for 
-to attempt flash loans with the liquidity in the pools.The DEX includes functionality to incentivize users to create liquidity 
+to attempt flash loans with the liquidity in the pools. The DEX includes functionality to incentivize users to create liquidity 
 pools and also provides a price oracle based on the existing liquidity pools.
 The swap and loan fee has a default value of 3 percent, but the pallet provides an the extrinsic `set_fee` to allow the fee to be changed. 
-When configuring the runtime, the origin that has permission to set the fee must be set.
+The Origins that have permission to set the fee is configured in the runtime.
 
 ## How it works 
 
