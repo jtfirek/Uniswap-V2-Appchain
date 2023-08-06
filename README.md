@@ -138,7 +138,7 @@ new_fee: u16,
 ```
 <br>
 
-#### [`set_fee`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/20fb7b87f5c3959e141663fff211a8bf28ce7208/pallets/dex/src/lib.rs#L375)
+#### [`flash_loan`](https://github.com/Polkadot-Blockchain-Academy/assigment-4-frame-jtfirek/blob/2606234c2eaf559b146793346cbf06b698f46fa1/pallets/dex/src/lib.rs#L407)
 **Description:** Allows a user to attempt a flash loan. The user can dispatch any any system call to return the loan with the fee. The user must return the amount of tokens that they borrowed plus a fee of 0.3 percent.
 **Call index**: 6
 #### Signature:

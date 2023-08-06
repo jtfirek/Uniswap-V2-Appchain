@@ -1,6 +1,7 @@
 
 use crate::{mock::{*, self}, Error, Event};
 use frame_support::{assert_noop, assert_ok, traits::fungibles::Inspect, assert_err};
+use sp_runtime::Percent;
 
 #[test]
 fn simple_add_remove_liquidity() {
@@ -169,5 +170,46 @@ fn changing_fee() {
 
 		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
 
+	});
+}
+
+#[test]
+fn empty_pool_fail() {
+	new_test_ext().execute_with(|| {
+		// Go past genesis block so events get deposited
+		System::set_block_number(1);
+
+		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
+
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
+		assert_ok!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500));
+
+
+		// can't remove liquidity from an empty pool
+		assert_err!(Dex::remove_liquidity(RuntimeOrigin::signed(1), 1, 2, 500), Error::<Test>::InsufficientLPBalance);
+
+		// can't swap from an empty pool
+		assert_err!(Dex::swap_exact_in_for_out(RuntimeOrigin::signed(1), 1, 2, 500, 0), Error::<Test>::NoneValue);
+	});
+}
+
+#[test]
+fn test_ratio() {
+	new_test_ext().execute_with(|| {
+		System::set_block_number(1);
+		assert_ok!(Dex::setup_account(1, vec![(1, 1000), (2, 1000)]));
+
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 500));
+
+		// should be 1:1 ratio
+		let rate11 = Percent::from_rational(1u16,1u16);
+		assert_ok!(Dex::price_oracle(RuntimeOrigin::signed(1), 1, 2));
+		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent{asset_in: 1, asset_out: 2, rate: rate11}));
+
+		assert_ok!(Dex::add_liquidity(RuntimeOrigin::signed(1), 1, 2, 500, 0));
+		assert_ok!(Dex::price_oracle(RuntimeOrigin::signed(1), 1, 2));
+		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent{asset_in: 1, asset_out: 2, rate: Percent::from_rational(1u16,2u16)}));
+		assert_ok!(Dex::price_oracle(RuntimeOrigin::signed(1), 2, 1));
+		System::assert_last_event(mock::RuntimeEvent::Dex(Event::PriceOracleEvent{asset_in: 2, asset_out: 1, rate: Percent::from_rational(2u16,1u16)}));
 	});
 }

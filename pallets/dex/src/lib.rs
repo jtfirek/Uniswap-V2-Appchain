@@ -256,7 +256,7 @@ use frame_support::{
 			match <PoolMap<T>>::get(&cur_lp_id) {
 				None => { // New Pool
 					lp_amount = Self::calculate_lp(&add_amounts, None)?;
-					T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , true, lp_amount)?;
+					let _ = T::Fungibles::create(cur_lp_id.clone(), Self::account_id() , true, lp_amount);
 					T::Fungibles::mint_into(cur_lp_id.clone(), &who, lp_amount)?;
 					let new_pool = Pool::<T>::new(add_amounts, lp_amount);
 					<PoolMap<T>>::insert(&cur_lp_id, new_pool);
@@ -278,6 +278,7 @@ use frame_support::{
 		/// Removes liquidity from a given pool pair by burning LP tokens.
     	/// The function checks the balance of the LP tokens, calculates the amount of each asset to return,
     	/// burns the LP tokens, updates the pool, and then returns assets to the user.
+		/// If LP tokens falls to default, the pool is removed from storage
 		#[pallet::call_index(1)]
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
 		pub fn remove_liquidity(
@@ -347,7 +348,7 @@ use frame_support::{
 			) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let cur_lp_id = Self::get_lp_id(&asset_in, &asset_out)?;
-			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoneValue)?;
+			let pool = <PoolMap<T>>::get(&cur_lp_id).ok_or(Error::<T>::NoPool)?;
 
 			let amount_in = Self::calculate_in(&exact_out, &asset_out, &pool)?;
 			if amount_in.0 > max_in {
@@ -481,7 +482,7 @@ impl<T: Config> Pallet<T> {
 		new_lp: &AssetBalanceOf<T>,
 		pool_id: &AssetIdOf<T>,
 	) -> Result<(), DispatchError> {
-		let mut pool = <PoolMap<T>>::get(pool_id).ok_or(Error::<T>::NoneValue)?;
+		let mut pool = <PoolMap<T>>::get(pool_id).ok_or(Error::<T>::NoPool)?;
 		pool.pool_pair.amount_1 = pool.pool_pair.amount_1.checked_add(&new_pair.amount_1).ok_or(ArithmeticError::Overflow)?;
 		pool.pool_pair.amount_2 = pool.pool_pair.amount_2.checked_add(&new_pair.amount_2).ok_or(ArithmeticError::Overflow)?;
 		pool.lp_supply = pool.lp_supply.checked_add(&new_lp).ok_or(ArithmeticError::Overflow)?;
@@ -496,11 +497,16 @@ impl<T: Config> Pallet<T> {
 		new_lp: &AssetBalanceOf<T>,
 		pool_id: &AssetIdOf<T>,
 	) -> Result<(), DispatchError> {
-		let mut pool = <PoolMap<T>>::get(pool_id).ok_or(Error::<T>::NoneValue)?;
+		let mut pool = <PoolMap<T>>::get(pool_id).ok_or(Error::<T>::NoPool)?;
 		pool.pool_pair.amount_1 = pool.pool_pair.amount_1.checked_sub(&amount_1).ok_or(ArithmeticError::Underflow)?;
 		pool.pool_pair.amount_2 = pool.pool_pair.amount_2.checked_sub(&amount_2).ok_or(ArithmeticError::Underflow)?;
 		pool.lp_supply = pool.lp_supply.checked_sub(&new_lp).ok_or(ArithmeticError::Underflow)?;
-		<PoolMap<T>>::insert(pool_id, pool);
+
+		if pool.lp_supply == Default::default() {
+			<PoolMap<T>>::remove(pool_id);
+		} else {
+			<PoolMap<T>>::insert(pool_id, pool);
+		}
 		Ok(())
 	}
 
