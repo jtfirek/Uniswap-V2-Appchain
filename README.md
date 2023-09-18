@@ -1,7 +1,7 @@
 # Uniswap V2 Style DEX Pallet
 
 
-This a Appchain for a DEX that is based on the Uniswap V2 design. It uses FRAME to construct the runtime and includes a custom DEX pallet that I created. The DEX also allows for users to attempt flash loans with the liquidity in the pools. The DEX includes functionality to incentivize users to create liquidity 
+This a Appchain for a DEX that is based on the Uniswap V2 design and is built using substrate. It uses FRAME to construct the runtime and includes a custom DEX pallet that I created. The DEX also allows for users to attempt flash loans with the liquidity in the pools. The DEX includes functionality to incentivize users to create liquidity 
 pools and also provides a price oracle based on the existing liquidity pools. The swap and loan fee has a default value of 3 percent, but the pallet provides an the extrinsic `set_fee` to allow the fee to be changed. The Origins that have permission to set the fee is configured in the runtime. 
 
 ## How it works 
